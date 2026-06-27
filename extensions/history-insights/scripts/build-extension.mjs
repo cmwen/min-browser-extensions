@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 
 const target = process.argv[2] ?? "chrome";
-const allowedTargets = new Set(["chrome", "edge", "safari"]);
+const allowedTargets = new Set(["chrome", "edge", "firefox", "safari"]);
 
 if (!allowedTargets.has(target)) {
   console.error(`Unsupported target: ${target}`);

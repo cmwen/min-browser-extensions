@@ -1,6 +1,6 @@
 # Min Browser Extensions
 
-Monorepo for browser extensions that target Chrome, Microsoft Edge, and Safari.
+Monorepo for browser extensions that target Chrome, Microsoft Edge, Firefox, and Safari.
 
 ## Tooling
 
@@ -27,9 +27,13 @@ pnpm typecheck
 pnpm typecheck:native
 pnpm build:chrome
 pnpm build:edge
+pnpm build:firefox
 pnpm build:safari
+pnpm pages:screenshots
 ```
 
-Chrome and Edge builds use the side panel manifest. Safari uses the same UI through a compatible popup fallback because Safari does not expose Chromium's `side_panel` extension surface. Browser tab grouping is best-effort where the target browser exposes grouping APIs; the extension still tracks its own managed groups so tabs can be closed together from the UI.
+Chrome and Edge builds use side panel manifests. Firefox and Safari use the same UI through compatible popup fallbacks because the Chromium `side_panel` extension surface is not portable across those browsers. Browser tab grouping is best-effort where the target browser exposes grouping APIs; the extension still tracks its own managed groups so tabs can be closed together from the UI.
 
 GitHub release builds are produced per changed extension. Shared package or root tooling changes release every extension because those changes can affect all build outputs.
+
+GitHub Pages is served from `docs/`. The Pages workflow refreshes the committed extension screenshots with Playwright before deploying the static site.

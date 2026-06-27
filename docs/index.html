@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Min Browser Extensions</title>
+    <meta
+      name="description"
+      content="Browser extensions for tab workspaces, LLM conversation tracking, and local-first history insights across Chrome, Edge, Firefox, and Safari."
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="Min Browser Extensions home">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>Min Browser Extensions</span>
+      </a>
+      <nav aria-label="Sections">
+        <a href="#extensions">Extensions</a>
+        <a href="#browsers">Browsers</a>
+        <a href="#build">Build</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero-section" aria-labelledby="hero-heading">
+        <div class="hero-copy">
+          <p class="eyebrow">Chrome, Edge, Firefox, and Safari-minded WebExtensions</p>
+          <h1 id="hero-heading">Operational browser tools for tabs, LLM work, and history review.</h1>
+          <p>
+            Tab Workspace Manager keeps active work visible with tab grouping, media indicators, workspace templates,
+            and LLM follow-up states. History Insights turns local browser history and active-tab time into exportable
+            patterns.
+          </p>
+          <div class="hero-actions" aria-label="Primary links">
+            <a class="primary-link" href="https://github.com/cmwen/min-browser-extensions/releases">Download builds</a>
+            <a class="secondary-link" href="https://github.com/cmwen/min-browser-extensions">View source</a>
+          </div>
+        </div>
+        <div class="hero-image" aria-label="Tab Workspace Manager screenshot">
+          <img src="assets/screenshots/tab-workspace-manager.png" alt="Tab Workspace Manager side panel preview" />
+        </div>
+      </section>
+
+      <section id="extensions" class="extension-grid" aria-label="Extensions">
+        <article class="extension-card">
+          <div class="extension-copy">
+            <p class="eyebrow">Tab Workspace Manager</p>
+            <h2>Replace tab hunting with a dense workspace panel.</h2>
+            <p>
+              Group by domain, open saved workspaces, track chatbot conversations, pin useful pages, and spot tabs
+              playing media without leaving the panel.
+            </p>
+            <ul>
+              <li>Native tab groups where the browser exposes them.</li>
+              <li>Popup fallback for Firefox and Safari.</li>
+              <li>Status badges for waiting, responded, pinned, stale, and needs-review LLM tabs.</li>
+            </ul>
+          </div>
+          <img src="assets/screenshots/tab-workspace-manager.png" alt="Tab Workspace Manager showing grouped tabs and media playback" />
+        </article>
+
+        <article class="extension-card">
+          <div class="extension-copy">
+            <p class="eyebrow">History Insights</p>
+            <h2>Review browsing patterns without shipping history to a service.</h2>
+            <p>
+              Filter by date and domain, combine history visits with locally cached active-tab time, then export JSON
+              or CSV for analysis.
+            </p>
+            <ul>
+              <li>Local storage for active-time aggregates.</li>
+              <li>Date, domain, visit, page, and hourly summaries.</li>
+              <li>Side panel on Chromium browsers, popup fallback elsewhere.</li>
+            </ul>
+          </div>
+          <img src="assets/screenshots/history-insights.png" alt="History Insights dashboard with metrics and domain charts" />
+        </article>
+      </section>
+
+      <section id="browsers" class="support-band" aria-labelledby="browser-heading">
+        <div>
+          <p class="eyebrow">Browser support</p>
+          <h2 id="browser-heading">One codebase, explicit browser outputs.</h2>
+        </div>
+        <div class="browser-grid">
+          <span>Chrome <strong>side panel</strong></span>
+          <span>Edge <strong>side panel</strong></span>
+          <span>Firefox <strong>popup fallback</strong></span>
+          <span>Safari <strong>popup fallback</strong></span>
+        </div>
+      </section>
+
+      <section id="build" class="build-section" aria-labelledby="build-heading">
+        <div>
+          <p class="eyebrow">Build prompts</p>
+          <h2 id="build-heading">Generate unpacked extension bundles locally.</h2>
+          <p>Run the target you need, then load the matching `dist/&lt;browser&gt;` folder in that browser's extension developer mode.</p>
+        </div>
+        <pre><code>pnpm install
+pnpm build:chrome
+pnpm build:edge
+pnpm build:firefox
+pnpm build:safari</code></pre>
+      </section>
+    </main>
+  </body>
+</html>

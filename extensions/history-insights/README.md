@@ -1,6 +1,6 @@
 # History Insights
 
-Local-first browser history analytics for Chrome, Microsoft Edge, and Safari-compatible WebExtension builds.
+Local-first browser history analytics for Chrome, Microsoft Edge, Firefox, and Safari-compatible WebExtension builds.
 
 ## Features
 
@@ -21,9 +21,10 @@ pnpm --filter @minext/history-insights test
 pnpm --filter @minext/history-insights typecheck
 pnpm --filter @minext/history-insights build:chrome
 pnpm --filter @minext/history-insights build:edge
+pnpm --filter @minext/history-insights build:firefox
 pnpm --filter @minext/history-insights build:safari
 ```
 
 ## Loading Builds
 
-Chrome and Edge builds are emitted under `dist/chrome` and `dist/edge` with a side panel manifest. Safari uses `dist/safari` with a popup fallback because Safari Web Extensions do not expose Chromium's `side_panel` API.
+Chrome and Edge builds are emitted under `dist/chrome` and `dist/edge` with a side panel manifest. Firefox and Safari use `dist/firefox` and `dist/safari` with popup fallbacks because Chromium's `side_panel` API is not portable across those browsers.

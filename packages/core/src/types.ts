@@ -4,10 +4,12 @@ export type LlmConversationStatus = "active" | "waiting" | "responded" | "pinned
 
 export type TabSnapshot = {
   active: boolean;
+  audible?: boolean;
   favIconUrl?: string;
   groupId?: number;
   id: number;
   lastActiveAt?: number;
+  muted?: boolean;
   openedAt?: number;
   openerTabId?: number;
   pinned: boolean;

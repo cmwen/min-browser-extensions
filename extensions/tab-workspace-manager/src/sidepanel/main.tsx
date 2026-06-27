@@ -18,6 +18,8 @@ import {
   Search,
   Settings,
   Sparkles,
+  Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
 import {
@@ -1172,6 +1174,20 @@ function WorkspaceButton({
   );
 }
 
+function MediaBadge({ tab }: { tab: TabSnapshot }): React.ReactElement | null {
+  if (!tab.audible && !tab.muted) {
+    return null;
+  }
+
+  const muted = Boolean(tab.muted);
+  return (
+    <span className={muted ? "media-badge is-muted" : "media-badge"} title={muted ? "Tab audio is muted" : "Tab is playing media"}>
+      {muted ? <VolumeX size={11} /> : <Volume2 size={11} />}
+      {muted ? "Muted" : "Playing"}
+    </span>
+  );
+}
+
 function ContextRail({
   conversationStatusByTabId,
   followUpUrls,
@@ -1264,6 +1280,7 @@ function ContextRail({
               <small>{tab.active ? "Current tab" : relationSummary(item, activeItem)}</small>
             </span>
           </button>
+          <MediaBadge tab={tab} />
           {tab.pinned ? <span className="pin-badge">Pinned</span> : null}
           {status ? (
             <span className={`tab-status-badge status-${status}`}>
@@ -1394,6 +1411,7 @@ function TabList({
                 <small>{tab.url}</small>
               </span>
             </button>
+            <MediaBadge tab={tab} />
             {tab.pinned ? <span className="pin-badge">Pinned</span> : null}
             {status ? (
               <span className={`tab-status-badge status-${status}`}>

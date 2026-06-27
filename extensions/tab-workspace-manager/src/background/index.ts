@@ -34,7 +34,7 @@ const PAGE_SUMMARY_CONTEXT_MENU_ID = "tab-workspace-manager.summarize-page";
 const FOLLOW_UP_ALARM_PREFIX = "tabWorkspaceManager.followUp:";
 const FOLLOW_UP_NOTIFICATION_PREFIX = "tabWorkspaceManager.followUpNotification:";
 
-type ChromeTabApi = {
+type NativeTabGroupApi = {
   tabs?: {
     group?: (options: { groupId?: number; tabIds: number[] }) => Promise<number> | number;
   };
@@ -92,9 +92,13 @@ type BrowserTabGroup = {
 
 type BrowserTab = {
   active?: boolean;
+  audible?: boolean;
   favIconUrl?: string;
   groupId?: number;
   id?: number;
+  mutedInfo?: {
+    muted?: boolean;
+  };
   openerTabId?: number;
   pinned?: boolean;
   title?: string;
@@ -107,8 +111,12 @@ type MessageSender = {
 };
 
 type TabChangeInfo = {
+  audible?: boolean;
   favIconUrl?: string;
   groupId?: number;
+  mutedInfo?: {
+    muted?: boolean;
+  };
   status?: string;
   title?: string;
   url?: string;
@@ -119,8 +127,14 @@ type TabMetadata = {
   openedAt: number;
 };
 
-const chromeTabs = (): ChromeTabApi => (globalThis as typeof globalThis & { chrome?: ChromeTabApi }).chrome ?? {};
-const reminderApis = (): ReminderRuntimeApi => (globalThis as typeof globalThis & { chrome?: ReminderRuntimeApi }).chrome ?? {};
+const nativeTabGroupApis = (): NativeTabGroupApi => {
+  const runtime = globalThis as typeof globalThis & {
+    browser?: NativeTabGroupApi;
+    chrome?: NativeTabGroupApi;
+  };
+  return runtime.chrome ?? runtime.browser ?? {};
+};
+const reminderApis = (): ReminderRuntimeApi => (globalThis as typeof globalThis & { chrome?: ReminderRuntimeApi }).chrome ?? (webext as ReminderRuntimeApi);
 
 let panelRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -453,7 +467,9 @@ function snapshotTab(
   const rawTitle = tab.title ?? domainKeyForUrl(tab.url) ?? "Untitled";
   const snapshot: TabSnapshot = {
     active: Boolean(tab.active),
+    ...(typeof tab.audible === "boolean" ? { audible: tab.audible } : {}),
     id: tab.id,
+    ...(typeof tab.mutedInfo?.muted === "boolean" ? { muted: tab.mutedInfo.muted } : {}),
     pinned: Boolean(tab.pinned),
     title: rewritePageTitle(rawTitle, config.titleRewrite) || rawTitle,
     url: tab.url,
@@ -537,7 +553,7 @@ function browserGroupColor(value: string | undefined): BrowserGroupColor {
 }
 
 async function listBrowserTabGroups(tabs: TabSnapshot[]): Promise<Map<number, BrowserTabGroup>> {
-  const api = chromeTabs().tabGroups;
+  const api = nativeTabGroupApis().tabGroups;
   if (!api?.query) {
     return new Map();
   }
@@ -634,7 +650,7 @@ async function buildPanelState(): Promise<PanelState> {
 }
 
 async function updateTabGroup(groupId: number, title: string, color: string): Promise<void> {
-  const api = chromeTabs().tabGroups;
+  const api = nativeTabGroupApis().tabGroups;
   if (!api?.update) {
     return;
   }
@@ -643,7 +659,7 @@ async function updateTabGroup(groupId: number, title: string, color: string): Pr
 }
 
 async function groupTabIds(tabIds: number[], title: string, color: string, groupId?: number): Promise<number | undefined> {
-  const api = chromeTabs().tabs;
+  const api = nativeTabGroupApis().tabs;
   if (!api?.group || tabIds.length === 0) {
     return undefined;
   }
@@ -1151,7 +1167,15 @@ webext.tabs.onUpdated.addListener((tabId, changeInfo) => {
     void refreshConversationFromTab(tabId, changeInfo);
   }
 
-  if (changeInfo.status || changeInfo.title || changeInfo.url || changeInfo.favIconUrl || typeof changeInfo.groupId === "number") {
+  if (
+    changeInfo.status ||
+    changeInfo.title ||
+    changeInfo.url ||
+    changeInfo.favIconUrl ||
+    typeof changeInfo.groupId === "number" ||
+    typeof changeInfo.audible === "boolean" ||
+    typeof changeInfo.mutedInfo?.muted === "boolean"
+  ) {
     notifyPanelStateChanged();
   }
 });

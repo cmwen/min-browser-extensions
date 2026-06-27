@@ -98,12 +98,13 @@ jobs:
         run: |
           pnpm --filter "${{ matrix.packageName }}" build:chrome
           pnpm --filter "${{ matrix.packageName }}" build:edge
+          pnpm --filter "${{ matrix.packageName }}" build:firefox
           pnpm --filter "${{ matrix.packageName }}" build:safari
 
       - name: Package browser targets
         run: |
           mkdir -p artifacts
-          for target in chrome edge safari; do
+          for target in chrome edge firefox safari; do
             name="${{ matrix.directory }}-${target}-v${{ matrix.version }}.zip"
             (cd "extensions/${{ matrix.directory }}/dist/${target}" && zip -qr "$GITHUB_WORKSPACE/artifacts/$name" .)
           done

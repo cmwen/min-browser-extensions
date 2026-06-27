@@ -93,6 +93,7 @@ The side panel also listens for real tab title, URL, favicon, activation, remova
 ```sh
 pnpm --filter @minext/tab-workspace-manager build:chrome
 pnpm --filter @minext/tab-workspace-manager build:edge
+pnpm --filter @minext/tab-workspace-manager build:firefox
 pnpm --filter @minext/tab-workspace-manager build:safari
 pnpm --filter @minext/tab-workspace-manager typecheck
 pnpm --filter @minext/tab-workspace-manager typecheck:native
@@ -114,6 +115,14 @@ Edge:
 3. Enable Developer mode.
 4. Load unpacked from `extensions/tab-workspace-manager/dist/edge`.
 
+Firefox:
+
+1. Build with `pnpm build:firefox`.
+2. Open `about:debugging#/runtime/this-firefox`.
+3. Choose Load Temporary Add-on.
+4. Select `extensions/tab-workspace-manager/dist/firefox/manifest.json`.
+5. The Firefox manifest uses a popup fallback. Native tab group mirroring requires Firefox 138 or newer.
+
 Safari:
 
 1. Build with `pnpm build:safari`.
@@ -128,6 +137,12 @@ Safari:
 - Site access is more permission-forward in Safari, so content-script behavior depends on the user granting website access.
 - Some Chromium extension APIs, including tab grouping APIs, need browser-specific fallbacks or graceful no-op behavior.
 - Managed extension groups still work in the UI when browser tab grouping is unavailable, but Safari cannot mirror every group into a native browser tab group.
+
+## Firefox Notes
+
+- The Firefox build uses an action popup because Chromium's side panel API is not portable.
+- The manifest sets a Firefox 138 minimum for native tab group mirroring.
+- Media indicators use standard tab `audible` and `mutedInfo` fields when the browser reports them.
 
 ## Keyboard
 
