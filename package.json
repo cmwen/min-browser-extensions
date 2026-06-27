@@ -6,9 +6,9 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r --if-present build",
-    "build:chrome": "pnpm --filter @minext/tab-workspace-manager build:chrome",
-    "build:edge": "pnpm --filter @minext/tab-workspace-manager build:edge",
-    "build:safari": "pnpm --filter @minext/tab-workspace-manager build:safari",
+    "build:chrome": "pnpm -r --if-present build:chrome",
+    "build:edge": "pnpm -r --if-present build:edge",
+    "build:safari": "pnpm -r --if-present build:safari",
     "dev": "pnpm --filter @minext/tab-workspace-manager dev",
     "format": "pnpm -r --if-present format",
     "lint": "pnpm -r --if-present lint",

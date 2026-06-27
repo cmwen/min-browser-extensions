@@ -1,0 +1,143 @@
+name: Release Extensions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "extensions/**"
+      - "packages/**"
+      - "tools/release/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "tsconfig.base.json"
+      - ".github/workflows/release-extensions.yml"
+  workflow_dispatch:
+    inputs:
+      extensions:
+        description: "Optional comma-separated extension directories or package names"
+        required: false
+        type: string
+      release_tag:
+        description: "Optional release tag. Defaults to extensions-<short-sha>."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  discover:
+    name: Discover changed extensions
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.discover.outputs.matrix }}
+      release_tag: ${{ steps.release-tag.outputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: discover
+        name: Build release matrix
+        env:
+          BASE_SHA: ${{ github.event.before }}
+          EXTENSION_INPUT: ${{ github.event.inputs.extensions }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          MATRIX="$(node tools/release/changed-extensions.mjs --base "$BASE_SHA" --head "$HEAD_SHA" --extensions "$EXTENSION_INPUT")"
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "$MATRIX"
+
+      - id: release-tag
+        name: Resolve release tag
+        env:
+          INPUT_RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+        run: |
+          if [ -n "$INPUT_RELEASE_TAG" ]; then
+            TAG="$INPUT_RELEASE_TAG"
+          else
+            TAG="extensions-${GITHUB_SHA:0:12}"
+          fi
+          echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "$TAG"
+
+  build:
+    name: Build ${{ matrix.directory }}
+    needs: discover
+    if: fromJSON(needs.discover.outputs.matrix).count > 0
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test extension
+        run: pnpm --filter "${{ matrix.packageName }}" --if-present test
+
+      - name: Typecheck extension
+        run: pnpm --filter "${{ matrix.packageName }}" typecheck
+
+      - name: Build browser targets
+        run: |
+          pnpm --filter "${{ matrix.packageName }}" build:chrome
+          pnpm --filter "${{ matrix.packageName }}" build:edge
+          pnpm --filter "${{ matrix.packageName }}" build:safari
+
+      - name: Package browser targets
+        run: |
+          mkdir -p artifacts
+          for target in chrome edge safari; do
+            name="${{ matrix.directory }}-${target}-v${{ matrix.version }}.zip"
+            (cd "extensions/${{ matrix.directory }}/dist/${target}" && zip -qr "$GITHUB_WORKSPACE/artifacts/$name" .)
+          done
+          ls -lh artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.directory }}-release-zips
+          path: artifacts/*.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: [discover, build]
+    if: fromJSON(needs.discover.outputs.matrix).count > 0
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.discover.outputs.release_tag }}
+        run: |
+          NOTES="Browser extension builds for ${GITHUB_SHA}."
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" artifacts/*.zip --clobber
+          else
+            gh release create "$RELEASE_TAG" artifacts/*.zip --target "$GITHUB_SHA" --title "Extension builds ${RELEASE_TAG}" --notes "$NOTES"
+          fi
+
+  no-changes:
+    name: No extension release needed
+    needs: discover
+    if: fromJSON(needs.discover.outputs.matrix).count == 0
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No changed extension packages were detected."

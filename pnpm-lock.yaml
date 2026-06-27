@@ -39,6 +39,27 @@ importers:
         specifier: 4.1.9
         version: 4.1.9(@types/node@26.0.0)(jsdom@29.1.1)(vite@8.0.16(@types/node@26.0.0))
 
+  extensions/history-insights:
+    dependencies:
+      '@minext/browser-api':
+        specifier: workspace:*
+        version: link:../../packages/browser-api
+      '@minext/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      lucide-react:
+        specifier: 1.21.0
+        version: 1.21.0(react@19.2.7)
+      react:
+        specifier: 19.2.7
+        version: 19.2.7
+      react-dom:
+        specifier: 19.2.7
+        version: 19.2.7(react@19.2.7)
+      webextension-polyfill:
+        specifier: 0.12.0
+        version: 0.12.0
+
   extensions/tab-workspace-manager:
     dependencies:
       '@minext/browser-api':
