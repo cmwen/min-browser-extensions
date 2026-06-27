@@ -1,0 +1,871 @@
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { createRoot } from "react-dom/client";
+import {
+  Bot,
+  Clock3,
+  FolderKanban,
+  Globe2,
+  Keyboard,
+  LayoutPanelLeft,
+  Layers2,
+  Pin,
+  RefreshCw,
+  Search,
+  Settings,
+  Sparkles,
+  X,
+} from "lucide-react";
+import { DEFAULT_CONFIG, type AppConfig, type LlmConversationStatus, type TabSnapshot, type WorkspaceTemplate } from "@minext/core";
+import { webext } from "@minext/browser-api";
+import type { ExtensionMessage, ExtensionResponse, PanelState, RuntimeEvent } from "../shared/messages";
+import "./styles.css";
+
+const root = document.getElementById("root");
+type PanelMode = "context" | "grouped";
+
+if (!root) {
+  throw new Error("Missing app root");
+}
+
+async function sendMessage<T extends ExtensionResponse>(message: ExtensionMessage): Promise<T> {
+  const response = (await webext.runtime.sendMessage(message)) as T;
+  if (!response.ok) {
+    throw new Error(response.error);
+  }
+  return response;
+}
+
+function statusLabel(status: LlmConversationStatus): string {
+  switch (status) {
+    case "needs-review":
+      return "Needs review";
+    case "responded":
+      return "Responded";
+    case "waiting":
+      return "Waiting";
+    case "pinned":
+      return "Pinned";
+    case "stale":
+      return "Stale";
+    case "active":
+      return "Active";
+  }
+}
+
+function applyTheme(config: AppConfig): void {
+  document.documentElement.dataset.theme = config.theme;
+}
+
+function tabMatchesQuery(tab: TabSnapshot, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) {
+    return true;
+  }
+
+  return `${tab.title} ${tab.url}`.toLowerCase().includes(needle);
+}
+
+type RelationshipReason = {
+  key: keyof AppConfig["contextMap"]["weights"];
+  label: string;
+  value: number;
+};
+
+type ContextTabItem = {
+  dimension: "active" | "domain" | "time";
+  groupTitle: string | undefined;
+  relation: {
+    reasons: RelationshipReason[];
+    score: number;
+  };
+  slot: number;
+  tab: TabSnapshot;
+};
+
+function hostForUrl(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+function minutesAgo(timestamp: number | undefined): string {
+  if (!timestamp) {
+    return "observed just now";
+  }
+
+  const minutes = Math.max(0, Math.round((Date.now() - timestamp) / 60_000));
+  if (minutes < 1) {
+    return "just now";
+  }
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+
+  return `${Math.round(minutes / 60)}h ago`;
+}
+
+function scoreContextTab(input: {
+  activeTab: TabSnapshot;
+  conversationStatusByTabId: Map<number, LlmConversationStatus>;
+  groupTitleByTabId: Map<number, string>;
+  pinnedUrls: Set<string>;
+  tab: TabSnapshot;
+  weights: AppConfig["contextMap"]["weights"];
+}): ContextTabItem["relation"] {
+  const { activeTab, conversationStatusByTabId, groupTitleByTabId, pinnedUrls, tab, weights } = input;
+  const reasons: RelationshipReason[] = [];
+  let rawScore = 0;
+  let maxScore = 0;
+
+  const addReason = (key: RelationshipReason["key"], label: string, value: number) => {
+    const weight = weights[key];
+    maxScore += weight;
+    if (value <= 0) {
+      return;
+    }
+
+    rawScore += weight * value;
+    reasons.push({ key, label, value });
+  };
+
+  if (tab.id === activeTab.id) {
+    return { reasons: [{ key: "opener", label: "current tab", value: 1 }], score: 1 };
+  }
+
+  const activeHost = hostForUrl(activeTab.url);
+  const tabHost = hostForUrl(tab.url);
+  const sameBrowserGroup = typeof activeTab.groupId === "number" && activeTab.groupId >= 0 && activeTab.groupId === tab.groupId;
+  const sameManagedGroup = groupTitleByTabId.get(activeTab.id) && groupTitleByTabId.get(activeTab.id) === groupTitleByTabId.get(tab.id);
+  const openedGap = activeTab.openedAt && tab.openedAt ? Math.abs(activeTab.openedAt - tab.openedAt) : undefined;
+  const activeGap = activeTab.lastActiveAt && tab.lastActiveAt ? Math.abs(activeTab.lastActiveAt - tab.lastActiveAt) : undefined;
+  const activeStatus = conversationStatusByTabId.get(activeTab.id);
+  const tabStatus = conversationStatusByTabId.get(tab.id);
+
+  addReason(
+    "opener",
+    tab.openerTabId === activeTab.id || activeTab.openerTabId === tab.id ? "opened from this tab" : "opener branch",
+    tab.openerTabId === activeTab.id || activeTab.openerTabId === tab.id ? 1 : 0,
+  );
+  addReason("sameDomain", "same site", activeHost === tabHost ? 1 : 0);
+  addReason("sameGroup", "same group", sameBrowserGroup || sameManagedGroup ? 1 : 0);
+  addReason("openTime", "opened nearby", openedGap === undefined ? 0 : Math.max(0, 1 - openedGap / (45 * 60_000)));
+  addReason("activeHistory", "recently active", activeGap === undefined ? 0 : Math.max(0, 1 - activeGap / (30 * 60_000)));
+  addReason("pinned", tab.pinned || pinnedUrls.has(tab.url) ? "pinned page" : "not pinned", tab.pinned || pinnedUrls.has(tab.url) ? 1 : 0);
+  addReason("llmConversation", "LLM conversation", activeStatus && tabStatus ? 1 : 0);
+
+  return {
+    reasons: reasons.sort((a, b) => b.value - a.value),
+    score: maxScore > 0 ? Math.min(1, rawScore / maxScore) : 0,
+  };
+}
+
+function buildContextRailItems(input: {
+  activeTab: TabSnapshot | undefined;
+  conversationStatusByTabId: Map<number, LlmConversationStatus>;
+  groupTitleByTabId: Map<number, string>;
+  pinnedUrls: Set<string>;
+  tabs: TabSnapshot[];
+  weights: AppConfig["contextMap"]["weights"];
+}): ContextTabItem[] {
+  const { activeTab, conversationStatusByTabId, groupTitleByTabId, pinnedUrls, tabs, weights } = input;
+  if (!activeTab) {
+    return [];
+  }
+
+  const related = tabs
+    .filter((tab) => tab.id !== activeTab.id)
+    .map((tab) => ({
+      groupTitle: groupTitleByTabId.get(tab.id),
+      relation: scoreContextTab({ activeTab, conversationStatusByTabId, groupTitleByTabId, pinnedUrls, tab, weights }),
+      tab,
+    }))
+    .sort((a, b) => b.relation.score - a.relation.score || (b.tab.lastActiveAt ?? 0) - (a.tab.lastActiveAt ?? 0));
+
+  const timeDimension = related
+    .filter((item) => item.tab.openedAt && activeTab.openedAt)
+    .sort((a, b) => Math.abs((a.tab.openedAt ?? 0) - (activeTab.openedAt ?? 0)) - Math.abs((b.tab.openedAt ?? 0) - (activeTab.openedAt ?? 0)));
+  const timeIds = new Set(timeDimension.slice(0, Math.ceil(related.length / 2)).map((item) => item.tab.id));
+  const domainDimension = related.filter((item) => !timeIds.has(item.tab.id));
+
+  const activeItem: ContextTabItem = {
+    dimension: "active",
+    groupTitle: groupTitleByTabId.get(activeTab.id),
+    relation: { reasons: [{ key: "opener", label: "current tab", value: 1 }], score: 1 },
+    slot: 0,
+    tab: activeTab,
+  };
+
+  return [
+    activeItem,
+    ...timeDimension.slice(0, Math.ceil(related.length / 2)).map((item, index) => ({ ...item, dimension: "time" as const, slot: -(index + 1) })),
+    ...domainDimension.map((item, index) => ({ ...item, dimension: "domain" as const, slot: index + 1 })),
+  ].sort((a, b) => a.slot - b.slot);
+}
+
+function App(): React.ReactElement {
+  const [state, setState] = useState<PanelState>({
+    config: DEFAULT_CONFIG,
+    conversations: [],
+    managedGroups: [],
+    pinnedShortcuts: [],
+    tabs: [],
+  });
+  const [query, setQuery] = useState("");
+  const [panelMode, setPanelMode] = useState<PanelMode>("context");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+
+  const load = useCallback(async () => {
+    const response = await sendMessage<{ ok: true; state: PanelState }>({ type: "GET_PANEL_STATE" });
+    setState(response.state);
+    applyTheme(response.state.config);
+  }, []);
+
+  useEffect(() => {
+    void load().catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : String(loadError)));
+  }, [load]);
+
+  useEffect(() => {
+    let pending: number | undefined;
+    const onMessage = (message: unknown) => {
+      if ((message as RuntimeEvent).type !== "PANEL_STATE_CHANGED") {
+        return;
+      }
+
+      if (pending) {
+        window.clearTimeout(pending);
+      }
+
+      pending = window.setTimeout(() => {
+        void load().catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : String(loadError)));
+      }, 80);
+    };
+
+    webext.runtime.onMessage.addListener(onMessage);
+    return () => {
+      if (pending) {
+        window.clearTimeout(pending);
+      }
+      webext.runtime.onMessage.removeListener(onMessage);
+    };
+  }, [load]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (mod && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        document.querySelector<HTMLInputElement>("#tab-search")?.focus();
+      }
+      if (mod && event.shiftKey && event.key.toLowerCase() === "g") {
+        event.preventDefault();
+        void runAction({ type: "GROUP_BY_DOMAIN" });
+      }
+      if (event.key === "Escape") {
+        setQuery("");
+        document.querySelector<HTMLInputElement>("#tab-search")?.blur();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
+  const conversationStatusByTabId = useMemo(
+    () => new Map(state.conversations.map((conversation) => [conversation.tabId, conversation.status])),
+    [state.conversations],
+  );
+
+  const groupedTabIds = useMemo(
+    () => new Set(state.managedGroups.flatMap((group) => group.tabs.map((tab) => tab.id))),
+    [state.managedGroups],
+  );
+
+  const tabIdsByGroupId = useMemo(
+    () => new Map(state.managedGroups.map((group) => [group.id, group.tabs.map((tab) => tab.id)])),
+    [state.managedGroups],
+  );
+
+  const groupTitleByTabId = useMemo(
+    () =>
+      new Map(
+        state.managedGroups.flatMap((group) =>
+          group.tabs.map((tab) => [tab.id, group.title] as const),
+        ),
+      ),
+    [state.managedGroups],
+  );
+
+  const pinnedUrls = useMemo(
+    () => new Set(state.pinnedShortcuts.map((shortcut) => shortcut.url)),
+    [state.pinnedShortcuts],
+  );
+
+  const hasSearchQuery = query.trim().length > 0;
+
+  const visibleUngroupedTabs = useMemo(
+    () => state.tabs.filter((tab) => !groupedTabIds.has(tab.id)),
+    [groupedTabIds, state.tabs],
+  );
+
+  const filteredManagedGroups = useMemo(() => {
+    if (!hasSearchQuery) {
+      return state.managedGroups;
+    }
+
+    return state.managedGroups
+      .map((group) => ({ ...group, tabs: group.tabs.filter((tab) => tabMatchesQuery(tab, query)) }))
+      .filter((group) => group.tabs.length > 0);
+  }, [hasSearchQuery, query, state.managedGroups]);
+
+  const filteredUngroupedTabs = useMemo(
+    () => visibleUngroupedTabs.filter((tab) => tabMatchesQuery(tab, query)),
+    [query, visibleUngroupedTabs],
+  );
+
+  const filteredTabs = useMemo(
+    () => state.tabs.filter((tab) => tabMatchesQuery(tab, query)),
+    [query, state.tabs],
+  );
+
+  const matchingGroupedTabCount = useMemo(
+    () => filteredManagedGroups.reduce((count, group) => count + group.tabs.length, 0),
+    [filteredManagedGroups],
+  );
+
+  const matchingTabCount = filteredUngroupedTabs.length + matchingGroupedTabCount;
+
+  const activeTab = useMemo(
+    () => state.tabs.find((tab) => tab.active) ?? state.tabs[0],
+    [state.tabs],
+  );
+
+  const contextItems = useMemo(
+    () =>
+      buildContextRailItems({
+        activeTab,
+        conversationStatusByTabId,
+        groupTitleByTabId,
+        pinnedUrls,
+        tabs: filteredTabs,
+        weights: state.config.contextMap.weights,
+      }),
+    [activeTab, conversationStatusByTabId, filteredTabs, groupTitleByTabId, pinnedUrls, state.config.contextMap.weights],
+  );
+
+  const runAction = useCallback(
+    async (message: ExtensionMessage) => {
+      setBusy(true);
+      setError(undefined);
+      try {
+        await sendMessage(message);
+        await load();
+      } catch (actionError) {
+        setError(actionError instanceof Error ? actionError.message : String(actionError));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [load],
+  );
+
+  const tuneWeightsForSelection = useCallback(
+    async (item: ContextTabItem) => {
+      if (!state.config.contextMap.adaptiveLearning || item.tab.id === activeTab?.id) {
+        return;
+      }
+
+      const boostedKeys = new Set(item.relation.reasons.slice(0, 2).map((reason) => reason.key));
+      const nextConfig: AppConfig = {
+        ...state.config,
+        contextMap: {
+          ...state.config.contextMap,
+          weights: Object.fromEntries(
+            Object.entries(state.config.contextMap.weights).map(([key, value]) => [
+              key,
+              Math.max(0, Math.min(1.5, value + (boostedKeys.has(key as RelationshipReason["key"]) ? 0.03 : -0.006))),
+            ]),
+          ) as AppConfig["contextMap"]["weights"],
+        },
+      };
+
+      await sendMessage({ type: "SAVE_CONFIG", config: nextConfig });
+      setState((current) => ({ ...current, config: nextConfig }));
+    },
+    [activeTab?.id, state.config],
+  );
+
+  const focusContextItem = useCallback(
+    async (item: ContextTabItem) => {
+      await tuneWeightsForSelection(item);
+      await runAction({ type: "FOCUS_TAB", tabId: item.tab.id, windowId: item.tab.windowId });
+    },
+    [runAction, tuneWeightsForSelection],
+  );
+
+  return (
+    <main className={`app-shell mode-${panelMode}`}>
+      <header className="panel-header">
+        <div>
+          <p className="eyebrow">Side panel</p>
+          <h1>Tab Workspace</h1>
+        </div>
+        <div className="header-actions" aria-label="Panel actions">
+          <button className="icon-button" type="button" title="Refresh tabs" onClick={() => void load()} disabled={busy}>
+            <RefreshCw size={17} />
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            title="Group domains"
+            onClick={() => void runAction({ type: "GROUP_BY_DOMAIN" })}
+            disabled={busy}
+          >
+            <FolderKanban size={17} />
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            title="Open settings"
+            onClick={() => void runAction({ type: "OPEN_OPTIONS" })}
+          >
+            <Settings size={17} />
+          </button>
+        </div>
+      </header>
+
+      <section className="sticky-tools" aria-label="Common tab actions">
+        <label className="search-box" htmlFor="tab-search">
+          <Search size={16} />
+          <input
+            id="tab-search"
+            type="search"
+            placeholder="Search tabs"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <kbd>{navigator.platform.includes("Mac") ? "⌘K" : "Ctrl K"}</kbd>
+        </label>
+
+        <div className="mode-toggle" role="tablist" aria-label="Panel mode">
+          <button
+            aria-selected={panelMode === "context"}
+            className={panelMode === "context" ? "is-selected" : ""}
+            role="tab"
+            type="button"
+            onClick={() => setPanelMode("context")}
+          >
+            Context map
+          </button>
+          <button
+            aria-selected={panelMode === "grouped"}
+            className={panelMode === "grouped" ? "is-selected" : ""}
+            role="tab"
+            type="button"
+            onClick={() => setPanelMode("grouped")}
+          >
+            Grouped tabs
+          </button>
+        </div>
+
+        <PinnedShortcuts shortcuts={state.pinnedShortcuts} runAction={runAction} />
+      </section>
+
+      {error ? <p className="inline-error" role="alert">{error}</p> : null}
+
+      <section className="section-stack" aria-labelledby="workspace-heading">
+        <div className="section-title">
+          <h2 id="workspace-heading">Workspaces</h2>
+          <span>{state.config.workspaceTemplates.length}</span>
+        </div>
+        <div className="workspace-list">
+          {state.config.workspaceTemplates.map((workspace) => (
+            <WorkspaceButton key={workspace.id} workspace={workspace} onOpen={(template) => runAction({ type: "OPEN_WORKSPACE", workspace: template })} />
+          ))}
+        </div>
+      </section>
+
+      <section className="section-stack" aria-labelledby="llm-heading">
+        <div className="section-title">
+          <h2 id="llm-heading">LLM launchpad</h2>
+          <Sparkles size={15} />
+        </div>
+        <div className="llm-grid">
+          {state.config.llmProviders
+            .filter((provider) => provider.enabled)
+            .map((provider) => (
+              <button key={provider.id} type="button" onClick={() => void runAction({ type: "OPEN_LLM_PROVIDER", providerId: provider.id })}>
+                <Bot size={16} />
+                {provider.name}
+              </button>
+            ))}
+        </div>
+      </section>
+
+      {panelMode === "context" ? (
+        <section className="section-stack context-map-section" aria-labelledby="tabs-heading">
+          <div className="section-title">
+            <h2 id="tabs-heading">Context map</h2>
+            <span>{filteredTabs.length}</span>
+          </div>
+          {contextItems.length ? (
+            <ContextRail
+              conversationStatusByTabId={conversationStatusByTabId}
+              items={contextItems}
+              onFocusTab={focusContextItem}
+              runAction={runAction}
+            />
+          ) : hasSearchQuery ? (
+            <EmptyState icon={<Search size={18} />} title="No tab matches" detail="Search checks tab titles and URLs across all tabs." />
+          ) : null}
+        </section>
+      ) : (
+        <GroupedTabsView
+          conversationStatusByTabId={conversationStatusByTabId}
+          filteredManagedGroups={filteredManagedGroups}
+          filteredTabs={filteredUngroupedTabs}
+          hasSearchQuery={hasSearchQuery}
+          matchingGroupedTabCount={matchingGroupedTabCount}
+          matchingTabCount={matchingTabCount}
+          runAction={runAction}
+          tabIdsByGroupId={tabIdsByGroupId}
+        />
+      )}
+
+      <footer className="shortcut-footer">
+        <Keyboard size={14} />
+        <span>{navigator.platform.includes("Mac") ? "Cmd" : "Ctrl"}+K search, {navigator.platform.includes("Mac") ? "Cmd" : "Ctrl"}+Shift+G group</span>
+      </footer>
+    </main>
+  );
+}
+
+function GroupedTabsView({
+  conversationStatusByTabId,
+  filteredManagedGroups,
+  filteredTabs,
+  hasSearchQuery,
+  matchingGroupedTabCount,
+  matchingTabCount,
+  runAction,
+  tabIdsByGroupId,
+}: {
+  conversationStatusByTabId: Map<number, LlmConversationStatus>;
+  filteredManagedGroups: PanelState["managedGroups"];
+  filteredTabs: TabSnapshot[];
+  hasSearchQuery: boolean;
+  matchingGroupedTabCount: number;
+  matchingTabCount: number;
+  runAction: (message: ExtensionMessage) => Promise<void>;
+  tabIdsByGroupId: Map<string, number[]>;
+}): React.ReactElement {
+  return (
+    <>
+      <section className="section-stack" aria-labelledby="managed-groups-heading">
+        <div className="section-title">
+          <h2 id="managed-groups-heading">Groups</h2>
+          <span>{hasSearchQuery ? matchingGroupedTabCount : filteredManagedGroups.length}</span>
+        </div>
+        <div className="domain-list">
+          {filteredManagedGroups.length ? (
+            filteredManagedGroups.map((group) => (
+              <details key={group.id} className="domain-group" open>
+                <summary>
+                  <span className={`group-swatch color-${group.color}`} />
+                  <span className="group-title-copy">
+                    <strong>{group.title}</strong>
+                    <small>{group.kind} - {group.tabs.length} tabs</small>
+                  </span>
+                  <button
+                    className="group-close-button"
+                    type="button"
+                    title={`Close ${group.title}`}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      void runAction({ type: "CLOSE_TABS", tabIds: tabIdsByGroupId.get(group.id) ?? group.tabs.map((tab) => tab.id) });
+                    }}
+                  >
+                    <X size={14} />
+                  </button>
+                </summary>
+                <TabList conversationStatusByTabId={conversationStatusByTabId} tabs={group.tabs} runAction={runAction} />
+              </details>
+            ))
+          ) : hasSearchQuery ? (
+            <EmptyState icon={<Search size={18} />} title="No grouped tab matches" detail="Try a title, domain, or URL from a grouped tab." />
+          ) : (
+            <EmptyState icon={<FolderKanban size={18} />} title="No managed groups yet" detail="Open a workspace, launch LLM sessions, or group domains." />
+          )}
+        </div>
+      </section>
+
+      <section className="section-stack" aria-labelledby="ungrouped-tabs-heading">
+        <div className="section-title">
+          <h2 id="ungrouped-tabs-heading">Tabs</h2>
+          <span>{filteredTabs.length}</span>
+        </div>
+        {filteredTabs.length ? (
+          <TabList conversationStatusByTabId={conversationStatusByTabId} tabs={filteredTabs} runAction={runAction} />
+        ) : hasSearchQuery && matchingTabCount === 0 ? (
+          <EmptyState icon={<Search size={18} />} title="No tab matches" detail="Search checks tab titles and URLs across groups and ungrouped tabs." />
+        ) : null}
+      </section>
+    </>
+  );
+}
+
+function WorkspaceButton({
+  onOpen,
+  workspace,
+}: {
+  onOpen: (workspace: WorkspaceTemplate) => Promise<void>;
+  workspace: WorkspaceTemplate;
+}): React.ReactElement {
+  return (
+    <button className="workspace-button" type="button" onClick={() => void onOpen(workspace)}>
+      <span className={`group-swatch color-${workspace.color}`} />
+      <span>
+        <strong>{workspace.name}</strong>
+        <small>{workspace.urls.length} tabs</small>
+      </span>
+    </button>
+  );
+}
+
+function ContextRail({
+  conversationStatusByTabId,
+  items,
+  onFocusTab,
+  runAction,
+}: {
+  conversationStatusByTabId: Map<number, LlmConversationStatus>;
+  items: ContextTabItem[];
+  onFocusTab: (item: ContextTabItem) => Promise<void>;
+  runAction: (message: ExtensionMessage) => Promise<void>;
+}): React.ReactElement {
+  const activeItem = items.find((item) => item.slot === 0);
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Home") {
+      return;
+    }
+
+    event.preventDefault();
+    const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(".context-tab-main")];
+    const currentIndex = buttons.findIndex((button) => button === document.activeElement);
+    const nextIndex =
+      event.key === "Home"
+        ? buttons.findIndex((button) => button.dataset.slot === "0")
+        : Math.max(0, Math.min(buttons.length - 1, currentIndex + (event.key === "ArrowDown" ? 1 : -1)));
+    buttons[nextIndex]?.focus();
+  };
+
+  return (
+    <div className="context-rail" role="list" onKeyDown={onKeyDown} aria-label="Tabs related to the active tab">
+      <div className="context-axis context-axis-time" aria-hidden="true">
+        <Clock3 size={13} />
+        Opened near this tab
+      </div>
+      <div className="context-axis context-axis-domain" aria-hidden="true">
+        <Globe2 size={13} />
+        Same site or group
+      </div>
+      {items.map((item) => {
+        const tab = item.tab;
+        const status = conversationStatusByTabId.get(tab.id);
+        const isStrong = item.relation.score >= 0.62 && item.slot !== 0;
+
+        return (
+          <div
+            key={tab.id}
+            className={[
+              "context-tab-row",
+              tab.active ? "is-active" : "",
+              isStrong ? "is-strong" : "",
+              `dimension-${item.dimension}`,
+            ].filter(Boolean).join(" ")}
+            style={{
+              "--relation-strength": item.relation.score,
+              "--row-opacity": Math.max(0.34, 1.04 - Math.abs(item.slot) * 0.11),
+              "--slot": item.slot,
+              "--slot-distance": Math.abs(item.slot),
+            } as React.CSSProperties}
+            title={tab.url}
+            role="listitem"
+          >
+            {isStrong ? <span className="connection-line" aria-hidden="true" /> : null}
+          <button
+            className="context-tab-main"
+            data-slot={item.slot}
+            type="button"
+            onClick={() => void onFocusTab(item)}
+          >
+            <span className="favicon" aria-hidden="true">
+              {tab.favIconUrl ? <img src={tab.favIconUrl} alt="" /> : <LayoutPanelLeft size={14} />}
+            </span>
+            <span className="tab-copy">
+              <strong>{tab.title}</strong>
+              <small>{tab.active ? "Current tab" : relationSummary(item, activeItem)}</small>
+            </span>
+          </button>
+          {tab.pinned ? <span className="pin-badge">Pinned</span> : null}
+          {status ? (
+            <span className={`tab-status-badge status-${status}`}>
+              {statusLabel(status)}
+            </span>
+          ) : null}
+          {item.groupTitle ? <span className="tab-status-badge group-badge"><Layers2 size={11} />{item.groupTitle}</span> : null}
+          <button
+            className="row-icon-button tab-pin-button"
+            type="button"
+            title="Save shortcut"
+            onClick={() => void runAction({ type: "PIN_PAGE", tabId: tab.id })}
+          >
+            <Pin size={14} />
+          </button>
+          <button
+            className="row-icon-button"
+            type="button"
+            title="Close tab"
+            onClick={() => void runAction({ type: "CLOSE_TABS", tabIds: [tab.id] })}
+          >
+            <X size={14} />
+          </button>
+        </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function relationSummary(item: ContextTabItem, activeItem: ContextTabItem | undefined): string {
+  const reason = item.relation.reasons[0]?.label;
+  const host = hostForUrl(item.tab.url);
+  const prefix = item.dimension === "time" ? "Above by time" : item.dimension === "domain" ? "Below by site/group" : "Current";
+  const activeHost = activeItem ? hostForUrl(activeItem.tab.url) : undefined;
+
+  if (reason) {
+    return `${prefix} - ${reason} - ${host}`;
+  }
+
+  if (activeHost && activeHost === host) {
+    return `${prefix} - same site - ${host}`;
+  }
+
+  return `${prefix} - ${minutesAgo(item.tab.openedAt)} - ${host}`;
+}
+
+function TabList({
+  conversationStatusByTabId,
+  runAction,
+  tabs,
+}: {
+  conversationStatusByTabId: Map<number, LlmConversationStatus>;
+  runAction: (message: ExtensionMessage) => Promise<void>;
+  tabs: TabSnapshot[];
+}): React.ReactElement {
+  return (
+    <div className="tab-list" role="list">
+      {tabs.map((tab) => {
+        const status = conversationStatusByTabId.get(tab.id);
+
+        return (
+          <div
+            key={tab.id}
+            className={tab.active ? "tab-row is-active" : "tab-row"}
+            title={tab.url}
+            role="listitem"
+          >
+            <button
+              className="tab-main"
+              type="button"
+              onClick={() => void runAction({ type: "FOCUS_TAB", tabId: tab.id, windowId: tab.windowId })}
+            >
+              <span className="favicon" aria-hidden="true">
+                {tab.favIconUrl ? <img src={tab.favIconUrl} alt="" /> : <LayoutPanelLeft size={14} />}
+              </span>
+              <span className="tab-copy">
+                <strong>{tab.title}</strong>
+                <small>{tab.url}</small>
+              </span>
+            </button>
+            {tab.pinned ? <span className="pin-badge">Pinned</span> : null}
+            {status ? (
+              <span className={`tab-status-badge status-${status}`}>
+                {statusLabel(status)}
+              </span>
+            ) : null}
+            <button
+              className="row-icon-button tab-pin-button"
+              type="button"
+              title="Save shortcut"
+              onClick={() => void runAction({ type: "PIN_PAGE", tabId: tab.id })}
+            >
+              <Pin size={14} />
+            </button>
+            <button
+              className="row-icon-button"
+              type="button"
+              title="Close tab"
+              onClick={() => void runAction({ type: "CLOSE_TABS", tabIds: [tab.id] })}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PinnedShortcuts({
+  runAction,
+  shortcuts,
+}: {
+  runAction: (message: ExtensionMessage) => Promise<void>;
+  shortcuts: PanelState["pinnedShortcuts"];
+}): React.ReactElement | null {
+  if (!shortcuts.length) {
+    return null;
+  }
+
+  return (
+    <div className="pinned-shortcuts" aria-label="Pinned page shortcuts">
+      {shortcuts.map((shortcut) => (
+        <span key={shortcut.id} className="shortcut-chip">
+          <button
+            className="shortcut-button"
+            type="button"
+            title={shortcut.title}
+            onClick={() => void runAction({ type: "OPEN_PINNED_SHORTCUT", shortcutId: shortcut.id })}
+          >
+            {shortcut.favIconUrl ? <img src={shortcut.favIconUrl} alt="" /> : <LayoutPanelLeft size={14} />}
+          </button>
+          <button
+            className="shortcut-remove"
+            type="button"
+            title={`Remove ${shortcut.title}`}
+            onClick={() => void runAction({ type: "REMOVE_PINNED_SHORTCUT", shortcutId: shortcut.id })}
+          >
+            <X size={10} />
+          </button>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function EmptyState({ detail, icon, title }: { detail: string; icon: React.ReactNode; title: string }): React.ReactElement {
+  return (
+    <div className="empty-state">
+      {icon}
+      <strong>{title}</strong>
+      <span>{detail}</span>
+    </div>
+  );
+}
+
+createRoot(root).render(<App />);

@@ -1,0 +1,16 @@
+{
+  "name": "@minext/browser-api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:native": "tsgo --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "webextension-polyfill": "0.12.0"
+  }
+}

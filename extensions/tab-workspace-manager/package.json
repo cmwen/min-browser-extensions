@@ -1,0 +1,23 @@
+{
+  "name": "@minext/tab-workspace-manager",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm build:chrome",
+    "build:chrome": "node scripts/build-extension.mjs chrome",
+    "build:edge": "node scripts/build-extension.mjs edge",
+    "build:safari": "node scripts/build-extension.mjs safari",
+    "dev": "vite --host 127.0.0.1",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:native": "tsgo --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@minext/browser-api": "workspace:*",
+    "@minext/core": "workspace:*",
+    "lucide-react": "1.21.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "webextension-polyfill": "0.12.0"
+  }
+}

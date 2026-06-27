@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Context Map Prototype</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="side-panel" aria-label="Context-aware tab side panel">
+        <header class="panel-header">
+          <div>
+            <p class="eyebrow">Tab Workspace Manager</p>
+            <h1>Context Map</h1>
+          </div>
+          <button class="ghost-button" id="theme-toggle" type="button" aria-label="Toggle theme">Dark</button>
+        </header>
+
+        <div class="active-summary" id="active-summary"></div>
+
+        <div class="sticky-tools" aria-label="Context controls">
+          <label class="search-field">
+            <span>Search</span>
+            <input id="search-input" type="search" placeholder="Title, URL, topic..." autocomplete="off" />
+          </label>
+
+          <div class="segmented-control" aria-label="Relationship lens">
+            <button type="button" class="segment is-active" data-lens="focus">Focus</button>
+            <button type="button" class="segment" data-lens="domain">Domain</button>
+            <button type="button" class="segment" data-lens="timeline">Timeline</button>
+            <button type="button" class="segment" data-lens="llm">LLM</button>
+          </div>
+
+          <div class="switch-row">
+            <label><input id="weak-links-toggle" type="checkbox" checked /> Weak links</label>
+            <label><input id="freeze-toggle" type="checkbox" /> Freeze order</label>
+          </div>
+        </div>
+
+        <section class="ranked-list" id="ranked-list" aria-label="Related tabs"></section>
+      </section>
+
+      <section class="map-stage" aria-label="Relationship visualization">
+        <header class="stage-header">
+          <div>
+            <p class="eyebrow">Dynamic 2D projection</p>
+            <h2>Tabs rearrange around the active tab</h2>
+          </div>
+          <div class="stage-actions">
+            <button class="secondary-button" id="simulate-switch" type="button">Simulate tab switch</button>
+            <button class="secondary-button" id="link-current" type="button">Pin relation</button>
+          </div>
+        </header>
+
+        <div class="workspace">
+          <svg class="edge-layer" id="edge-layer" aria-hidden="true"></svg>
+          <div class="map-layer" id="map-layer"></div>
+        </div>
+      </section>
+
+      <aside class="inspector" aria-label="Tab relationship inspector">
+        <header>
+          <p class="eyebrow">Inspector</p>
+          <h2>Why this order?</h2>
+        </header>
+        <section class="metric-grid" id="metric-grid"></section>
+        <section class="reason-panel" id="reason-panel"></section>
+        <section class="activity-panel">
+          <div class="section-heading">
+            <h3>Recent focus path</h3>
+            <span id="path-count"></span>
+          </div>
+          <ol class="focus-path" id="focus-path"></ol>
+        </section>
+      </aside>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
