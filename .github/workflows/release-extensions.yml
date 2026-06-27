@@ -32,6 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.discover.outputs.matrix }}
+      extension_count: ${{ steps.discover.outputs.extension_count }}
       release_tag: ${{ steps.release-tag.outputs.release_tag }}
     steps:
       - uses: actions/checkout@v4
@@ -45,8 +46,11 @@ jobs:
           EXTENSION_INPUT: ${{ github.event.inputs.extensions }}
           HEAD_SHA: ${{ github.sha }}
         run: |
-          MATRIX="$(node tools/release/changed-extensions.mjs --base "$BASE_SHA" --head "$HEAD_SHA" --extensions "$EXTENSION_INPUT")"
+          DISCOVERY="$(node tools/release/changed-extensions.mjs --base "$BASE_SHA" --head "$HEAD_SHA" --extensions "$EXTENSION_INPUT")"
+          MATRIX="$(DISCOVERY="$DISCOVERY" node -e 'const discovery = JSON.parse(process.env.DISCOVERY); process.stdout.write(JSON.stringify({ include: discovery.include }));')"
+          COUNT="$(DISCOVERY="$DISCOVERY" node -e 'const discovery = JSON.parse(process.env.DISCOVERY); process.stdout.write(String(discovery.count));')"
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "extension_count=$COUNT" >> "$GITHUB_OUTPUT"
           echo "$MATRIX"
 
       - id: release-tag
@@ -65,7 +69,7 @@ jobs:
   build:
     name: Build ${{ matrix.directory }}
     needs: discover
-    if: fromJSON(needs.discover.outputs.matrix).count > 0
+    if: fromJSON(needs.discover.outputs.extension_count) > 0
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -114,7 +118,7 @@ jobs:
   publish:
     name: Publish GitHub release
     needs: [discover, build]
-    if: fromJSON(needs.discover.outputs.matrix).count > 0
+    if: fromJSON(needs.discover.outputs.extension_count) > 0
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -137,7 +141,7 @@ jobs:
   no-changes:
     name: No extension release needed
     needs: discover
-    if: fromJSON(needs.discover.outputs.matrix).count == 0
+    if: fromJSON(needs.discover.outputs.extension_count) == 0
     runs-on: ubuntu-latest
     steps:
       - run: echo "No changed extension packages were detected."
