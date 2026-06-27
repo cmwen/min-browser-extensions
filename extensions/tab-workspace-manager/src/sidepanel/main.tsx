@@ -8,11 +8,13 @@ import {
   Clock3,
   FolderKanban,
   Globe2,
+  Info,
   Keyboard,
   LayoutPanelLeft,
   Layers2,
   Pin,
   RefreshCw,
+  RotateCcw,
   Search,
   Settings,
   Sparkles,
@@ -108,6 +110,21 @@ type ContextTabItem = {
   tab: TabSnapshot;
 };
 
+type SuggestedMode = {
+  mode: PanelMode;
+  reason: string;
+};
+
+type ReadLaterCleanupCandidate = {
+  reason: string;
+  tab: TabSnapshot;
+};
+
+type CleanupBatch = {
+  itemIds: string[];
+  savedAt: number;
+};
+
 function hostForUrl(url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
@@ -184,6 +201,103 @@ function dateTimeLocalValue(timestamp: number | undefined): string {
   const date = new Date(timestamp);
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function durationLabel(milliseconds: number): string {
+  const minutes = Math.max(1, Math.round(milliseconds / 60_000));
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h`;
+  }
+
+  return `${Math.round(hours / 24)}d`;
+}
+
+function isWebUrl(url: string): boolean {
+  return url.startsWith("https://") || url.startsWith("http://");
+}
+
+function followUpIdForUrl(url: string): string {
+  return `follow-up:${url}`;
+}
+
+function readLaterCandidateReason(tab: TabSnapshot, now = Date.now()): string | undefined {
+  if (tab.active || tab.pinned || !isWebUrl(tab.url)) {
+    return undefined;
+  }
+
+  const openedAt = tab.openedAt ?? tab.lastActiveAt;
+  const lastActiveAt = tab.lastActiveAt ?? tab.openedAt;
+  const openAge = openedAt ? now - openedAt : 0;
+  const inactiveAge = lastActiveAt ? now - lastActiveAt : 0;
+
+  if (openAge >= 24 * 60 * 60_000) {
+    return `Open for ${durationLabel(openAge)}`;
+  }
+  if (inactiveAge >= 3 * 60 * 60_000 && openAge >= 45 * 60_000) {
+    return `Inactive for ${durationLabel(inactiveAge)}`;
+  }
+  if (openAge >= 6 * 60 * 60_000) {
+    return `Open for ${durationLabel(openAge)}`;
+  }
+
+  return undefined;
+}
+
+function buildReadLaterCleanupCandidates(input: {
+  followUps: FollowUpItem[];
+  query: string;
+  tabs: TabSnapshot[];
+}): ReadLaterCleanupCandidate[] {
+  const { followUps, query, tabs } = input;
+  const existingUrls = new Set(followUps.filter((item) => item.status !== "done").map((item) => item.url));
+  const needle = query.trim().toLowerCase();
+
+  return tabs
+    .filter((tab) => !existingUrls.has(tab.url) && (!needle || tabMatchesQuery(tab, needle)))
+    .map((tab) => ({ reason: readLaterCandidateReason(tab), tab }))
+    .filter((candidate): candidate is ReadLaterCleanupCandidate => Boolean(candidate.reason))
+    .sort((a, b) => (a.tab.lastActiveAt ?? a.tab.openedAt ?? 0) - (b.tab.lastActiveAt ?? b.tab.openedAt ?? 0));
+}
+
+function suggestPanelMode(input: {
+  contextItems: ContextTabItem[];
+  followUps: FollowUpItem[];
+  readLaterCandidates: ReadLaterCleanupCandidate[];
+}): SuggestedMode {
+  const dueCount = input.followUps.filter((item) => item.status === "due" || item.status === "needs-review").length;
+  if (dueCount > 0) {
+    return { mode: "follow-up", reason: `${dueCount} follow-up item${dueCount === 1 ? " needs" : "s need"} attention` };
+  }
+
+  if (input.readLaterCandidates.length >= 3) {
+    return { mode: "follow-up", reason: `${input.readLaterCandidates.length} tabs look ready to save for later` };
+  }
+
+  const relatedCount = input.contextItems.filter((item) => item.slot !== 0 && item.relation.score >= 0.42).length;
+  if (relatedCount >= 3) {
+    return { mode: "context", reason: `${relatedCount} tabs look related to the current tab` };
+  }
+
+  return { mode: "grouped", reason: "General tab management looks like the best fit" };
+}
+
+function relationSignalRows(item: ContextTabItem): Array<{ label: string; value: string }> {
+  const reasonRows = item.relation.reasons.slice(0, 4).map((reason) => ({
+    label: reason.label,
+    value: `${Math.round(reason.value * 100)}%`,
+  }));
+
+  return [
+    { label: "Rank score", value: `${Math.round(item.relation.score * 100)}%` },
+    ...reasonRows,
+    { label: "Opened", value: minutesAgo(item.tab.openedAt) },
+    { label: "Last active", value: minutesAgo(item.tab.lastActiveAt) },
+  ];
 }
 
 function scoreContextTab(input: {
@@ -436,6 +550,16 @@ function App(): React.ReactElement {
     [activeTab, conversationStatusByTabId, filteredTabs, groupTitleByTabId, pinnedUrls, state.config.contextMap.weights],
   );
 
+  const readLaterCandidates = useMemo(
+    () => buildReadLaterCleanupCandidates({ followUps: state.followUps, query, tabs: state.tabs }),
+    [query, state.followUps, state.tabs],
+  );
+
+  const suggestedMode = useMemo(
+    () => suggestPanelMode({ contextItems, followUps: state.followUps, readLaterCandidates }),
+    [contextItems, readLaterCandidates, state.followUps],
+  );
+
   const runAction = useCallback(
     async (message: ExtensionMessage) => {
       setBusy(true);
@@ -533,8 +657,12 @@ function App(): React.ReactElement {
         <div className="mode-toggle" role="tablist" aria-label="Panel mode">
           <button
             aria-selected={panelMode === "context"}
-            className={panelMode === "context" ? "is-selected" : ""}
+            className={[
+              panelMode === "context" ? "is-selected" : "",
+              suggestedMode.mode === "context" ? "is-suggested" : "",
+            ].filter(Boolean).join(" ")}
             role="tab"
+            title={suggestedMode.mode === "context" ? `Suggested: ${suggestedMode.reason}` : undefined}
             type="button"
             onClick={() => setPanelMode("context")}
           >
@@ -542,8 +670,12 @@ function App(): React.ReactElement {
           </button>
           <button
             aria-selected={panelMode === "grouped"}
-            className={panelMode === "grouped" ? "is-selected" : ""}
+            className={[
+              panelMode === "grouped" ? "is-selected" : "",
+              suggestedMode.mode === "grouped" ? "is-suggested" : "",
+            ].filter(Boolean).join(" ")}
             role="tab"
+            title={suggestedMode.mode === "grouped" ? `Suggested: ${suggestedMode.reason}` : undefined}
             type="button"
             onClick={() => setPanelMode("grouped")}
           >
@@ -551,8 +683,12 @@ function App(): React.ReactElement {
           </button>
           <button
             aria-selected={panelMode === "follow-up"}
-            className={panelMode === "follow-up" ? "is-selected" : ""}
+            className={[
+              panelMode === "follow-up" ? "is-selected" : "",
+              suggestedMode.mode === "follow-up" ? "is-suggested" : "",
+            ].filter(Boolean).join(" ")}
             role="tab"
+            title={suggestedMode.mode === "follow-up" ? `Suggested: ${suggestedMode.reason}` : undefined}
             type="button"
             onClick={() => setPanelMode("follow-up")}
           >
@@ -623,7 +759,7 @@ function App(): React.ReactElement {
           tabIdsByGroupId={tabIdsByGroupId}
         />
       ) : (
-        <FollowUpView activeTab={activeTab} followUps={state.followUps} query={query} runAction={runAction} />
+        <FollowUpView activeTab={activeTab} followUps={state.followUps} query={query} runAction={runAction} tabs={state.tabs} />
       )}
 
       <footer className="shortcut-footer">
@@ -714,18 +850,36 @@ function FollowUpView({
   followUps,
   query,
   runAction,
+  tabs,
 }: {
   activeTab: TabSnapshot | undefined;
   followUps: FollowUpItem[];
   query: string;
   runAction: (message: ExtensionMessage) => Promise<void>;
+  tabs: TabSnapshot[];
 }): React.ReactElement {
+  const [lastCleanupBatch, setLastCleanupBatch] = useState<CleanupBatch | undefined>();
   const needle = query.trim().toLowerCase();
   const visibleItems = followUps
     .filter((item) => !needle || `${item.title} ${item.url} ${item.note ?? ""}`.toLowerCase().includes(needle))
     .sort((a, b) => followUpSortValue(a) - followUpSortValue(b));
   const activeItems = visibleItems.filter((item) => item.status !== "done");
   const doneItems = visibleItems.filter((item) => item.status === "done").slice(0, 6);
+  const cleanupCandidates = buildReadLaterCleanupCandidates({ followUps, query, tabs }).slice(0, 5);
+
+  const saveCleanupCandidates = async (candidates: ReadLaterCleanupCandidate[]) => {
+    const itemIds = candidates.map((candidate) => followUpIdForUrl(candidate.tab.url));
+    for (const candidate of candidates) {
+      await runAction({
+        closeTab: true,
+        reminderAt: reminderPreset("week"),
+        source: "read-later",
+        tabId: candidate.tab.id,
+        type: "ADD_FOLLOW_UP_FROM_TAB",
+      });
+    }
+    setLastCleanupBatch({ itemIds, savedAt: Date.now() });
+  };
 
   return (
     <section className="section-stack follow-up-section" aria-labelledby="follow-up-heading">
@@ -752,6 +906,56 @@ function FollowUpView({
           >
             <Archive size={15} />
             Save and close
+          </button>
+        </div>
+      ) : null}
+
+      {cleanupCandidates.length ? (
+        <section className="read-later-cleanup" aria-labelledby="read-later-cleanup-heading">
+          <div className="section-title">
+            <h3 id="read-later-cleanup-heading">Read-later cleanup</h3>
+            <button type="button" onClick={() => void saveCleanupCandidates(cleanupCandidates)}>
+              Save top {cleanupCandidates.length}
+            </button>
+          </div>
+          <div className="cleanup-candidate-list" role="list">
+            {cleanupCandidates.map((candidate) => (
+              <div key={candidate.tab.id} className="cleanup-candidate-row" role="listitem">
+                <span className="favicon" aria-hidden="true">
+                  {candidate.tab.favIconUrl ? <img src={candidate.tab.favIconUrl} alt="" /> : <LayoutPanelLeft size={14} />}
+                </span>
+                <span className="tab-copy">
+                  <strong>{candidate.tab.title}</strong>
+                  <small>{candidate.reason} - {hostForUrl(candidate.tab.url)}</small>
+                </span>
+                <button
+                  className="row-icon-button"
+                  type="button"
+                  title="Save and close"
+                  onClick={() => void saveCleanupCandidates([candidate])}
+                >
+                  <Archive size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {lastCleanupBatch ? (
+        <div className="cleanup-restore">
+          <small>{lastCleanupBatch.itemIds.length} saved for later</small>
+          <button
+            type="button"
+            onClick={() => void (async () => {
+              for (const itemId of lastCleanupBatch.itemIds) {
+                await runAction({ itemId, type: "OPEN_FOLLOW_UP" });
+              }
+              setLastCleanupBatch(undefined);
+            })()}
+          >
+            <RotateCcw size={14} />
+            Reopen batch
           </button>
         </div>
       ) : null}
@@ -989,6 +1193,19 @@ function ContextRail({
           >
             <X size={14} />
           </button>
+          <details className="context-signal-details">
+            <summary title="Show ranking signals">
+              <Info size={13} />
+            </summary>
+            <div className="context-signal-panel">
+              {relationSignalRows(item).map((signal) => (
+                <span key={`${signal.label}:${signal.value}`} className="context-signal-row">
+                  <span>{signal.label}</span>
+                  <strong>{signal.value}</strong>
+                </span>
+              ))}
+            </div>
+          </details>
         </div>
         );
       })}

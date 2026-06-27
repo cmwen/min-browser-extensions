@@ -16,9 +16,12 @@ Side panel extension for choosing the right tab workflow for the moment: focus o
 - Ungrouped Tabs list that hides tabs already shown inside managed Groups.
 - Pinned page shortcuts under the search field for quick relaunch without keeping those pages open.
 - Context map mode that keeps the active tab centered and ranks nearby tabs by opener, domain, group, open time, activation history, pins, and LLM conversation signals.
+- Context map rows expose a compact signal detail view so users can inspect why a tab was ranked without crowding the main panel.
 - Grouped tabs mode that preserves the original managed groups and ungrouped tabs workflow.
 - Follow-up mode for saving tabs as TODO/read-later items, reopening saved URLs, setting custom reminder times, receiving due notifications where supported, snoozing until tomorrow, marking items for review, marking done, and removing items.
 - Save-and-close flow for moving the current tab into Follow-up without keeping it open.
+- Read-later cleanup suggestions in Follow-up mode, with explicit save-and-close controls and a reopen-batch restore path.
+- Suggested modes are indicated through subtle mode-toggle styling instead of extra chips in the main panel.
 - Configurable context-map weights and optional adaptive learning from the tabs users choose next.
 - Optional title cleanup rules for replacing redundant page title text in the panel. This is disabled by default.
 - Options page for theme, workspaces, LLM shortcuts, grouping rules, context-map ranking, title cleanup, import, and export.
