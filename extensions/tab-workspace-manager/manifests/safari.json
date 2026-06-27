@@ -49,5 +49,5 @@
     "https://copilot.microsoft.com/*",
     "https://www.perplexity.ai/*"
   ],
-  "permissions": ["contextMenus", "storage", "tabs"]
+  "permissions": ["alarms", "contextMenus", "notifications", "storage", "tabs"]
 }

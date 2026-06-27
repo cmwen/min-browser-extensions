@@ -618,6 +618,38 @@
     grid-column: 1 / -1;
   }
 
+  .follow-up-reminder-editor {
+    align-items: end;
+    display: grid;
+    gap: 8px;
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .follow-up-reminder-editor label {
+    color: var(--muted);
+    display: grid;
+    font-size: 0.72rem;
+    font-weight: 650;
+    gap: 4px;
+  }
+
+  .follow-up-reminder-editor input {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font: inherit;
+    min-block-size: 32px;
+    min-width: 0;
+    padding-inline: 8px;
+  }
+
+  .follow-up-reminder-editor button {
+    justify-content: center;
+    min-block-size: 32px;
+  }
+
   .done-follow-ups {
     border-block-start: 1px solid var(--border);
     margin-block-start: 14px;

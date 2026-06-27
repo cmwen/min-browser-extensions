@@ -31,6 +31,8 @@ const PINNED_SHORTCUTS_KEY = "tabWorkspaceManager.pinnedShortcuts";
 const FOLLOW_UP_ITEMS_KEY = "tabWorkspaceManager.followUps";
 const TAB_METADATA_KEY = "tabWorkspaceManager.tabMetadata";
 const PAGE_SUMMARY_CONTEXT_MENU_ID = "tab-workspace-manager.summarize-page";
+const FOLLOW_UP_ALARM_PREFIX = "tabWorkspaceManager.followUp:";
+const FOLLOW_UP_NOTIFICATION_PREFIX = "tabWorkspaceManager.followUpNotification:";
 
 type ChromeTabApi = {
   tabs?: {
@@ -42,6 +44,42 @@ type ChromeTabApi = {
       groupId: number,
       options: { collapsed?: boolean; color?: string; title?: string },
     ) => Promise<unknown> | unknown;
+  };
+};
+
+type BrowserAlarm = {
+  name: string;
+};
+
+type BrowserAlarmApi = {
+  clear?: (name: string) => Promise<boolean> | boolean;
+  create?: (name: string, alarmInfo: { when: number }) => void;
+  onAlarm?: {
+    addListener: (listener: (alarm: BrowserAlarm) => void) => void;
+  };
+};
+
+type BrowserNotificationApi = {
+  create?: (
+    notificationId: string,
+    options: {
+      iconUrl?: string;
+      message: string;
+      priority?: number;
+      title: string;
+      type: "basic";
+    },
+  ) => Promise<string> | string;
+  onClicked?: {
+    addListener: (listener: (notificationId: string) => void) => void;
+  };
+};
+
+type ReminderRuntimeApi = {
+  alarms?: BrowserAlarmApi;
+  notifications?: BrowserNotificationApi;
+  runtime?: {
+    getURL?: (path: string) => string;
   };
 };
 
@@ -82,6 +120,7 @@ type TabMetadata = {
 };
 
 const chromeTabs = (): ChromeTabApi => (globalThis as typeof globalThis & { chrome?: ChromeTabApi }).chrome ?? {};
+const reminderApis = (): ReminderRuntimeApi => (globalThis as typeof globalThis & { chrome?: ReminderRuntimeApi }).chrome ?? {};
 
 let panelRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -161,6 +200,85 @@ function normalizeFollowUpStatus(item: FollowUpItem, now = Date.now()): FollowUp
   return item;
 }
 
+function followUpAlarmName(itemId: string): string {
+  return `${FOLLOW_UP_ALARM_PREFIX}${itemId}`;
+}
+
+function followUpNotificationId(itemId: string): string {
+  return `${FOLLOW_UP_NOTIFICATION_PREFIX}${itemId}`;
+}
+
+function itemIdFromAlarmName(name: string): string | undefined {
+  return name.startsWith(FOLLOW_UP_ALARM_PREFIX) ? name.slice(FOLLOW_UP_ALARM_PREFIX.length) : undefined;
+}
+
+function itemIdFromNotificationId(notificationId: string): string | undefined {
+  return notificationId.startsWith(FOLLOW_UP_NOTIFICATION_PREFIX) ? notificationId.slice(FOLLOW_UP_NOTIFICATION_PREFIX.length) : undefined;
+}
+
+async function clearFollowUpAlarm(itemId: string): Promise<void> {
+  await Promise.resolve(reminderApis().alarms?.clear?.(followUpAlarmName(itemId))).catch(() => undefined);
+}
+
+async function scheduleFollowUpAlarm(item: FollowUpItem): Promise<void> {
+  await clearFollowUpAlarm(item.id);
+  if (!item.reminderAt || item.status === "done" || item.status === "due" || item.status === "needs-review") {
+    return;
+  }
+
+  const alarms = reminderApis().alarms;
+  if (!alarms?.create) {
+    return;
+  }
+
+  alarms.create(followUpAlarmName(item.id), { when: Math.max(Date.now() + 1_000, item.reminderAt) });
+}
+
+async function scheduleFollowUpAlarms(items?: FollowUpItem[]): Promise<void> {
+  const followUps = items ?? (await getFollowUps());
+  await Promise.all(followUps.map((item) => scheduleFollowUpAlarm(item)));
+}
+
+async function showFollowUpNotification(item: FollowUpItem): Promise<void> {
+  const notifications = reminderApis().notifications;
+  if (!notifications?.create) {
+    return;
+  }
+
+  const iconUrl = item.favIconUrl ?? reminderApis().runtime?.getURL?.("icons/icon-128.png");
+  await Promise.resolve(
+    notifications.create(followUpNotificationId(item.id), {
+      ...(iconUrl ? { iconUrl } : {}),
+      message: item.note || item.url,
+      priority: 1,
+      title: `Follow up: ${item.title}`,
+      type: "basic",
+    }),
+  ).catch(() => undefined);
+}
+
+async function markFollowUpDue(itemId: string): Promise<void> {
+  const items = await getFollowUps();
+  const now = Date.now();
+  let dueItem: FollowUpItem | undefined;
+  const next = items.map((item) => {
+    if (item.id !== itemId || item.status === "done") {
+      return item;
+    }
+
+    dueItem = { ...item, status: "due", updatedAt: now };
+    return dueItem;
+  });
+
+  if (!dueItem) {
+    return;
+  }
+
+  await saveFollowUps(next);
+  await showFollowUpNotification(dueItem);
+  notifyPanelStateChanged();
+}
+
 function withoutLiveTabReference(item: FollowUpItem, updatedAt = Date.now()): FollowUpItem {
   const { tabId: _tabId, windowId: _windowId, ...rest } = item;
   return { ...rest, updatedAt };
@@ -193,6 +311,7 @@ async function getFollowUps(): Promise<FollowUpItem[]> {
 
 async function saveFollowUps(items: FollowUpItem[]): Promise<void> {
   await webext.storage.local.set({ [FOLLOW_UP_ITEMS_KEY]: items });
+  await scheduleFollowUpAlarms(items);
 }
 
 async function pruneFollowUps(tabs: TabSnapshot[]): Promise<FollowUpItem[]> {
@@ -722,6 +841,7 @@ async function openFollowUp(itemId: string): Promise<void> {
 
 async function removeFollowUp(itemId: string): Promise<void> {
   const items = await getFollowUps();
+  await clearFollowUpAlarm(itemId);
   await saveFollowUps(items.filter((item) => item.id !== itemId));
   notifyPanelStateChanged();
 }
@@ -901,13 +1021,27 @@ async function handleMessage(message: ExtensionMessage, sender: MessageSender = 
 }
 
 webext.runtime.onInstalled.addListener(() => {
-  void ensureDefaultConfig().then(refreshPageSummaryContextMenu);
+  void ensureDefaultConfig().then(refreshPageSummaryContextMenu).then(() => scheduleFollowUpAlarms());
   void enableActionSidePanelOpen();
 });
 
 webext.runtime.onStartup.addListener(() => {
-  void refreshPageSummaryContextMenu();
+  void refreshPageSummaryContextMenu().then(() => scheduleFollowUpAlarms());
   void enableActionSidePanelOpen();
+});
+
+reminderApis().alarms?.onAlarm?.addListener((alarm) => {
+  const itemId = itemIdFromAlarmName(alarm.name);
+  if (itemId) {
+    void markFollowUpDue(itemId);
+  }
+});
+
+reminderApis().notifications?.onClicked?.addListener((notificationId) => {
+  const itemId = itemIdFromNotificationId(notificationId);
+  if (itemId) {
+    void openFollowUp(itemId);
+  }
 });
 
 webext.contextMenus?.onClicked.addListener((info, tab) => {

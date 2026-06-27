@@ -176,6 +176,16 @@ function reminderPreset(preset: "later" | "tomorrow" | "week"): number {
   return now + 7 * 24 * 60 * 60_000;
 }
 
+function dateTimeLocalValue(timestamp: number | undefined): string {
+  if (!timestamp) {
+    return "";
+  }
+
+  const date = new Date(timestamp);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function scoreContextTab(input: {
   activeTab: TabSnapshot;
   conversationStatusByTabId: Map<number, LlmConversationStatus>;
@@ -777,6 +787,11 @@ function FollowUpRow({
   item: FollowUpItem;
   runAction: (message: ExtensionMessage) => Promise<void>;
 }): React.ReactElement {
+  const [reminderValue, setReminderValue] = useState(dateTimeLocalValue(item.reminderAt));
+  useEffect(() => {
+    setReminderValue(dateTimeLocalValue(item.reminderAt));
+  }, [item.reminderAt]);
+
   return (
     <article className={`follow-up-row status-${item.status}`} role="listitem">
       <button className="follow-up-main" type="button" onClick={() => void runAction({ itemId: item.id, type: "OPEN_FOLLOW_UP" })}>
@@ -822,6 +837,27 @@ function FollowUpRow({
           onClick={() => void runAction({ itemId: item.id, type: "REMOVE_FOLLOW_UP" })}
         >
           <X size={14} />
+        </button>
+      </div>
+      <div className="follow-up-reminder-editor">
+        <label>
+          Reminder
+          <input
+            type="datetime-local"
+            value={reminderValue}
+            onChange={(event) => setReminderValue(event.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => {
+            const timestamp = reminderValue ? new Date(reminderValue).getTime() : undefined;
+            if (typeof timestamp === "number" && Number.isFinite(timestamp)) {
+              void runAction({ itemId: item.id, patch: { reminderAt: timestamp, status: timestamp <= Date.now() ? "due" : "snoozed" }, type: "UPDATE_FOLLOW_UP" });
+            }
+          }}
+        >
+          Set
         </button>
       </div>
     </article>

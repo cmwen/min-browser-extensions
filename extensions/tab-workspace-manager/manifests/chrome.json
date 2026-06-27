@@ -55,7 +55,7 @@
     "https://copilot.microsoft.com/*",
     "https://www.perplexity.ai/*"
   ],
-  "permissions": ["contextMenus", "sidePanel", "storage", "tabGroups", "tabs"],
+  "permissions": ["alarms", "contextMenus", "notifications", "sidePanel", "storage", "tabGroups", "tabs"],
   "side_panel": {
     "default_path": "sidepanel.html"
   }
