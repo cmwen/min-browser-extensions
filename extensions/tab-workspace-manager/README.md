@@ -1,6 +1,6 @@
 # Tab Workspace Manager
 
-Side panel extension for choosing the right tab workflow for the moment: focus on a research task, manage ordinary groups, keep follow-up tabs visible, or stay quiet around app-like pages.
+Side panel extension for choosing the right tab workflow for the moment: focus on a research task, manage ordinary groups, or keep follow-up tabs visible for later.
 
 ## Features
 
@@ -31,9 +31,31 @@ Planned modes:
 
 - Context map: for research or focused work. The panel should hide unrelated already-open tabs by default and show workspace entry points, LLM launchers, the active tab, and directly related tabs. This keeps attention on one task.
 - Grouped tabs: for general browsing and cleanup. The panel shows managed groups, ungrouped tabs, search, close, pin, and grouping actions.
-- Follow-up: for tabs that behave like TODOs. Users can mark tabs as waiting, due, snoozed, done, or needing review, with optional reminders.
-- Read later: for low-urgency pages that users keep open as weak bookmarks. The extension can collect old or unread article-like tabs into a bucket and offer cleanup.
-- App mode: for app-like sites such as Gmail, YouTube, Netflix, Slack, Calendar, dashboards, and docs. The panel should stay quiet by default and may offer lightweight app companion actions when useful.
+- Follow-up: for tabs that behave like TODOs, reminders, or read-later items. Users can keep a tab for later without keeping it open all the time, then return when it is due or when they have attention again.
+
+Follow-up is the next major feature priority. It should combine reminder and read-later behavior instead of splitting them into separate modes. A follow-up item can represent a task to resume, an LLM conversation to check, a page to read later, a form to finish, or a research branch to revisit.
+
+Follow-up statuses should start simple:
+
+- Waiting: user is waiting on a page, LLM response, external event, or future context.
+- Due: the item needs attention now.
+- Snoozed: the item is intentionally hidden until a later time.
+- Needs review: the item is probably ready for user action.
+- Done: the item can be archived or removed.
+
+Follow-up actions should be explicit and reversible:
+
+- Add reminder.
+- Snooze.
+- Jump to live tab.
+- Reopen saved URL.
+- Mark done.
+- Archive.
+- Close tab after saving the follow-up item.
+
+Read-later cleanup should be part of Follow-up. The extension can suggest moving old, unread, low-urgency tabs into the follow-up bucket, but it should never close tabs automatically. User confirmation and restore paths are required.
+
+App mode is intentionally deferred. App-like pages such as Gmail, YouTube, Netflix, Slack, Calendar, dashboards, and docs may eventually get quiet-mode or companion behavior, but this work should not block Context map, Grouped tabs, or Follow-up.
 
 Transparent signals should not clutter the main panel. They should live in a secondary detail view, settings/debug view, or future per-tab inspector. Examples include time active, opened time, last active time, visit count, child tabs opened, app/media detection, pinned state, workspace/group membership, and read-later age.
 
