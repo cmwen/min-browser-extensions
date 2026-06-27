@@ -14,7 +14,7 @@ import {
   type WorkspaceTemplate,
 } from "@minext/core";
 import { webext } from "@minext/browser-api";
-import type { ExtensionMessage, ExtensionResponse } from "../shared/messages";
+import type { ExportPayload, ExtensionMessage, ExtensionResponse } from "../shared/messages";
 import "../sidepanel/styles.css";
 import "./options.css";
 
@@ -68,12 +68,16 @@ function App(): React.ReactElement {
   const [status, setStatus] = useState("Unsaved changes are applied after Save.");
   const [importValue, setImportValue] = useState("");
 
-  useEffect(() => {
-    void sendMessage<{ ok: true; config: AppConfig }>({ type: "GET_CONFIG" }).then((response) => {
+  const loadConfig = useCallback(async () => {
+    await sendMessage<{ ok: true; config: AppConfig }>({ type: "GET_CONFIG" }).then((response) => {
       setConfig(response.config);
       document.documentElement.dataset.theme = response.config.theme;
     });
   }, []);
+
+  useEffect(() => {
+    void loadConfig();
+  }, [loadConfig]);
 
   const save = useCallback(async () => {
     const next = mergeConfig({
@@ -121,16 +125,18 @@ function App(): React.ReactElement {
     setStatus("Unsaved changes.");
   };
 
-  const exportConfig = () => {
-    setImportValue(JSON.stringify(config, null, 2));
-    setStatus("Config exported below.");
+  const exportData = async () => {
+    const response = await sendMessage<{ ok: true; payload: ExportPayload }>({ type: "EXPORT_DATA" });
+    setImportValue(JSON.stringify(response.payload, null, 2));
+    setStatus("Full backup exported below.");
   };
 
-  const importConfig = () => {
+  const importData = async () => {
     try {
-      const parsed = mergeConfig(JSON.parse(importValue) as Partial<AppConfig>);
-      setConfig(parsed);
-      setStatus("Imported. Save to apply.");
+      const parsed = JSON.parse(importValue) as unknown;
+      await sendMessage({ type: "IMPORT_DATA", payload: parsed });
+      await loadConfig();
+      setStatus("Imported backup.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Invalid JSON.");
     }
@@ -482,11 +488,11 @@ function App(): React.ReactElement {
       <section className="settings-section">
         <h2>Import and export</h2>
         <div className="tool-grid">
-          <button type="button" onClick={exportConfig}>
+          <button type="button" onClick={() => void exportData()}>
             <Download size={16} />
             Export
           </button>
-          <button type="button" onClick={importConfig}>
+          <button type="button" onClick={() => void importData()}>
             <Upload size={16} />
             Import
           </button>
@@ -496,7 +502,7 @@ function App(): React.ReactElement {
           rows={8}
           value={importValue}
           onChange={(event) => setImportValue(event.target.value)}
-          placeholder="Paste exported config JSON"
+          placeholder="Paste a full backup JSON or legacy config JSON"
         />
       </section>
     </main>

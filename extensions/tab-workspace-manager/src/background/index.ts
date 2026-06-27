@@ -22,7 +22,7 @@ import {
   type TabSnapshot,
   type WorkspaceTemplate,
 } from "@minext/core";
-import type { ExtensionMessage, ExtensionResponse, PanelState, RuntimeEvent } from "../shared/messages";
+import type { ExportPayload, ExtensionMessage, ExtensionResponse, PanelState, RuntimeEvent } from "../shared/messages";
 
 const CONFIG_KEY = "tabWorkspaceManager.config";
 const CONVERSATIONS_KEY = "tabWorkspaceManager.conversations";
@@ -334,6 +334,73 @@ async function getTabMetadata(): Promise<Record<string, TabMetadata>> {
 
 async function saveTabMetadata(metadata: Record<string, TabMetadata>): Promise<void> {
   await webext.storage.local.set({ [TAB_METADATA_KEY]: metadata });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function arrayOrEmpty<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function tabMetadataOrEmpty(value: unknown): Record<string, TabMetadata> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, TabMetadata] => {
+      const metadata = entry[1];
+      return isRecord(metadata) && typeof metadata.openedAt === "number";
+    }),
+  );
+}
+
+async function exportData(): Promise<ExportPayload> {
+  return {
+    app: "tab-workspace-manager",
+    config: await getConfig(),
+    data: {
+      conversations: await getConversations(),
+      followUps: await getFollowUps(),
+      managedGroups: await getManagedGroups(),
+      pinnedShortcuts: await getPinnedShortcuts(),
+      tabMetadata: await getTabMetadata(),
+    },
+    exportedAt: new Date().toISOString(),
+    schemaVersion: 1,
+  };
+}
+
+async function importData(payload: unknown): Promise<void> {
+  const record = isRecord(payload) ? payload : {};
+  const isBackupPayload = record.app === "tab-workspace-manager" && isRecord(record.data);
+  const configSource = isBackupPayload ? record.config : record;
+  const nextConfig = mergeConfig(isRecord(configSource) ? (configSource as Partial<AppConfig>) : undefined);
+
+  await saveConfig(nextConfig);
+
+  if (!isBackupPayload) {
+    return;
+  }
+
+  const data = record.data as Record<string, unknown>;
+  if ("conversations" in data) {
+    await saveConversations(arrayOrEmpty<LlmConversation>(data.conversations).slice(0, 80));
+  }
+  if ("followUps" in data) {
+    await saveFollowUps(arrayOrEmpty<FollowUpItem>(data.followUps).slice(0, 200).map((item) => normalizeFollowUpStatus(item)));
+  }
+  if ("managedGroups" in data) {
+    await saveManagedGroups(arrayOrEmpty<ManagedTabGroup>(data.managedGroups));
+  }
+  if ("pinnedShortcuts" in data) {
+    await savePinnedShortcuts(arrayOrEmpty<PinnedPageShortcut>(data.pinnedShortcuts).slice(0, 48));
+  }
+  if ("tabMetadata" in data) {
+    await saveTabMetadata(tabMetadataOrEmpty(data.tabMetadata));
+  }
 }
 
 async function metadataForTabs(tabs: BrowserTab[]): Promise<Record<string, TabMetadata>> {
@@ -971,6 +1038,13 @@ async function handleMessage(message: ExtensionMessage, sender: MessageSender = 
       case "SAVE_CONFIG":
         await saveConfig(message.config);
         await refreshPageSummaryContextMenu();
+        return { ok: true };
+      case "EXPORT_DATA":
+        return { ok: true, payload: await exportData() };
+      case "IMPORT_DATA":
+        await importData(message.payload);
+        await refreshPageSummaryContextMenu();
+        notifyPanelStateChanged();
         return { ok: true };
       case "GROUP_BY_DOMAIN":
         await groupCurrentWindowByDomain();

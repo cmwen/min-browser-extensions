@@ -5,6 +5,7 @@ import type {
   FollowUpStatus,
   LlmConversation,
   LlmConversationStatus,
+  ManagedTabGroup,
   ManagedTabGroupView,
   PinnedPageShortcut,
   TabSnapshot,
@@ -26,10 +27,26 @@ export type FollowUpPatch = {
   status?: FollowUpStatus;
 };
 
+export type ExportPayload = {
+  app: "tab-workspace-manager";
+  config: AppConfig;
+  data: {
+    conversations: LlmConversation[];
+    followUps: FollowUpItem[];
+    managedGroups: ManagedTabGroup[];
+    pinnedShortcuts: PinnedPageShortcut[];
+    tabMetadata: Record<string, { lastActiveAt?: number; openedAt: number }>;
+  };
+  exportedAt: string;
+  schemaVersion: 1;
+};
+
 export type ExtensionMessage =
   | { type: "GET_PANEL_STATE" }
   | { type: "GET_CONFIG" }
   | { type: "SAVE_CONFIG"; config: AppConfig }
+  | { type: "EXPORT_DATA" }
+  | { type: "IMPORT_DATA"; payload: unknown }
   | { type: "GROUP_BY_DOMAIN" }
   | { type: "OPEN_WORKSPACE"; workspace: WorkspaceTemplate }
   | { type: "OPEN_LLM_PROVIDER"; providerId: string }
@@ -50,5 +67,6 @@ export type RuntimeEvent = { type: "PANEL_STATE_CHANGED" };
 export type ExtensionResponse =
   | { ok: true }
   | { ok: true; config: AppConfig }
+  | { ok: true; payload: ExportPayload }
   | { ok: true; state: PanelState }
   | { ok: false; error: string };

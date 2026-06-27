@@ -25,6 +25,7 @@ Side panel extension for choosing the right tab workflow for the moment: focus o
 - Configurable context-map weights and optional adaptive learning from the tabs users choose next.
 - Optional title cleanup rules for replacing redundant page title text in the panel. This is disabled by default.
 - Options page for theme, workspaces, LLM shortcuts, grouping rules, context-map ranking, title cleanup, import, and export.
+- Import/export supports a full backup payload with configuration, follow-ups, pinned shortcuts, managed groups, LLM conversation metadata, and local tab signal metadata. Legacy config-only JSON can still be imported.
 - Light, dark, and system theme modes.
 - Keyboard shortcuts for side panel access, search, and domain grouping.
 

@@ -36,62 +36,142 @@
 
 @layer theme {
   :root {
-    --bg: #f7f8fb;
+    --bg: #f6f8fa;
     --surface: #ffffff;
-    --surface-raised: #ffffff;
-    --text: #1f2937;
-    --muted: #64748b;
-    --border: #d8dee9;
-    --accent: #2563eb;
-    --accent-soft: #dbeafe;
-    --danger: #b91c1c;
-    --focus: #0284c7;
+    --surface-raised: #fbfcfe;
+    --text: #18212f;
+    --muted: #657386;
+    --border: #d7dee8;
+    --accent: #0f766e;
+    --accent-soft: #d8f3ef;
+    --danger: #b42318;
+    --focus: #0e7490;
+    --status-active-bg: #dbeafe;
+    --status-active-text: #1d4ed8;
+    --status-success-bg: #dcfce7;
+    --status-success-text: #166534;
+    --status-warning-bg: #fef3c7;
+    --status-warning-text: #92400e;
+    --status-review-bg: #ffedd5;
+    --status-review-text: #c2410c;
+    --status-snoozed-bg: #ede9fe;
+    --status-snoozed-text: #6d28d9;
+    --suggested: #16a34a;
+    --swatch-blue: #2563eb;
+    --swatch-green: #16a34a;
+    --swatch-purple: #7c3aed;
+    --swatch-cyan: #0891b2;
+    --swatch-orange: #ea580c;
+    --swatch-pink: #db2777;
+    --swatch-yellow: #ca8a04;
+    --swatch-red: #dc2626;
+    --swatch-grey: #64748b;
     --shadow: 0 1px 2px rgb(15 23 42 / 0.08);
   }
 
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #101419;
-      --surface: #151b22;
-      --surface-raised: #1b232d;
-      --text: #e5e7eb;
-      --muted: #9aa7b5;
-      --border: #2b3642;
-      --accent: #60a5fa;
-      --accent-soft: #172842;
-      --danger: #f87171;
-      --focus: #38bdf8;
+      --bg: #0f1418;
+      --surface: #171d23;
+      --surface-raised: #1f2730;
+      --text: #e8edf2;
+      --muted: #a4afba;
+      --border: #303a45;
+      --accent: #5eead4;
+      --accent-soft: #143b3a;
+      --danger: #fb7185;
+      --focus: #67e8f9;
+      --status-active-bg: #172554;
+      --status-active-text: #93c5fd;
+      --status-success-bg: #12351f;
+      --status-success-text: #86efac;
+      --status-warning-bg: #3d2d09;
+      --status-warning-text: #fde68a;
+      --status-review-bg: #431f0b;
+      --status-review-text: #fdba74;
+      --status-snoozed-bg: #2e1f52;
+      --status-snoozed-text: #c4b5fd;
+      --suggested: #86efac;
+      --swatch-blue: #60a5fa;
+      --swatch-green: #4ade80;
+      --swatch-purple: #a78bfa;
+      --swatch-cyan: #22d3ee;
+      --swatch-orange: #fb923c;
+      --swatch-pink: #f472b6;
+      --swatch-yellow: #facc15;
+      --swatch-red: #f87171;
+      --swatch-grey: #94a3b8;
       --shadow: 0 1px 2px rgb(0 0 0 / 0.35);
     }
   }
 
   :root[data-theme="light"] {
     color-scheme: light;
-    --bg: #f7f8fb;
+    --bg: #f6f8fa;
     --surface: #ffffff;
-    --surface-raised: #ffffff;
-    --text: #1f2937;
-    --muted: #64748b;
-    --border: #d8dee9;
-    --accent: #2563eb;
-    --accent-soft: #dbeafe;
-    --danger: #b91c1c;
-    --focus: #0284c7;
+    --surface-raised: #fbfcfe;
+    --text: #18212f;
+    --muted: #657386;
+    --border: #d7dee8;
+    --accent: #0f766e;
+    --accent-soft: #d8f3ef;
+    --danger: #b42318;
+    --focus: #0e7490;
+    --status-active-bg: #dbeafe;
+    --status-active-text: #1d4ed8;
+    --status-success-bg: #dcfce7;
+    --status-success-text: #166534;
+    --status-warning-bg: #fef3c7;
+    --status-warning-text: #92400e;
+    --status-review-bg: #ffedd5;
+    --status-review-text: #c2410c;
+    --status-snoozed-bg: #ede9fe;
+    --status-snoozed-text: #6d28d9;
+    --suggested: #16a34a;
+    --swatch-blue: #2563eb;
+    --swatch-green: #16a34a;
+    --swatch-purple: #7c3aed;
+    --swatch-cyan: #0891b2;
+    --swatch-orange: #ea580c;
+    --swatch-pink: #db2777;
+    --swatch-yellow: #ca8a04;
+    --swatch-red: #dc2626;
+    --swatch-grey: #64748b;
     --shadow: 0 1px 2px rgb(15 23 42 / 0.08);
   }
 
   :root[data-theme="dark"] {
     color-scheme: dark;
-    --bg: #101419;
-    --surface: #151b22;
-    --surface-raised: #1b232d;
-    --text: #e5e7eb;
-    --muted: #9aa7b5;
-    --border: #2b3642;
-    --accent: #60a5fa;
-    --accent-soft: #172842;
-    --danger: #f87171;
-    --focus: #38bdf8;
+    --bg: #0f1418;
+    --surface: #171d23;
+    --surface-raised: #1f2730;
+    --text: #e8edf2;
+    --muted: #a4afba;
+    --border: #303a45;
+    --accent: #5eead4;
+    --accent-soft: #143b3a;
+    --danger: #fb7185;
+    --focus: #67e8f9;
+    --status-active-bg: #172554;
+    --status-active-text: #93c5fd;
+    --status-success-bg: #12351f;
+    --status-success-text: #86efac;
+    --status-warning-bg: #3d2d09;
+    --status-warning-text: #fde68a;
+    --status-review-bg: #431f0b;
+    --status-review-text: #fdba74;
+    --status-snoozed-bg: #2e1f52;
+    --status-snoozed-text: #c4b5fd;
+    --suggested: #86efac;
+    --swatch-blue: #60a5fa;
+    --swatch-green: #4ade80;
+    --swatch-purple: #a78bfa;
+    --swatch-cyan: #22d3ee;
+    --swatch-orange: #fb923c;
+    --swatch-pink: #f472b6;
+    --swatch-yellow: #facc15;
+    --swatch-red: #f87171;
+    --swatch-grey: #94a3b8;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.35);
   }
 }
@@ -313,7 +393,7 @@
   }
 
   .mode-toggle button.is-suggested::after {
-    background: #22c55e;
+    background: var(--suggested);
     border-radius: 999px;
     block-size: 6px;
     content: "";
@@ -503,7 +583,7 @@
     border-color: var(--accent);
     box-shadow:
       inset 3px 0 0 var(--accent),
-      0 8px 18px rgb(37 99 235 / 0.14);
+      0 8px 18px color-mix(in srgb, var(--accent), transparent 84%);
   }
 
   .connection-line {
@@ -755,8 +835,8 @@
 
   .cleanup-restore {
     align-items: center;
-    background: color-mix(in srgb, #22c55e, transparent 90%);
-    border: 1px solid color-mix(in srgb, #22c55e, transparent 72%);
+    background: color-mix(in srgb, var(--status-success-text), transparent 90%);
+    border: 1px solid color-mix(in srgb, var(--status-success-text), transparent 72%);
     border-radius: 7px;
     display: flex;
     justify-content: space-between;
@@ -836,34 +916,34 @@
   }
 
   .tab-status-badge.status-responded {
-    background: color-mix(in srgb, #22c55e, transparent 84%);
-    color: #15803d;
+    background: var(--status-success-bg);
+    color: var(--status-success-text);
   }
 
   .tab-status-badge.status-waiting {
-    background: color-mix(in srgb, #eab308, transparent 82%);
-    color: #92400e;
+    background: var(--status-warning-bg);
+    color: var(--status-warning-text);
   }
 
   .tab-status-badge.status-active {
-    background: color-mix(in srgb, #3b82f6, transparent 86%);
-    color: #2563eb;
+    background: var(--status-active-bg);
+    color: var(--status-active-text);
   }
 
   .tab-status-badge.status-due,
   .tab-status-badge.status-needs-review {
-    background: color-mix(in srgb, #f97316, transparent 82%);
-    color: #c2410c;
+    background: var(--status-review-bg);
+    color: var(--status-review-text);
   }
 
   .tab-status-badge.status-snoozed {
-    background: color-mix(in srgb, #8b5cf6, transparent 84%);
-    color: #6d28d9;
+    background: var(--status-snoozed-bg);
+    color: var(--status-snoozed-text);
   }
 
   .tab-status-badge.status-done {
-    background: color-mix(in srgb, #22c55e, transparent 84%);
-    color: #15803d;
+    background: var(--status-success-bg);
+    color: var(--status-success-text);
   }
 
   .domain-group {
@@ -939,44 +1019,44 @@
 
   .color-blue,
   .status-active {
-    background: #3b82f6;
+    background: var(--swatch-blue);
   }
 
   .color-green,
   .status-responded {
-    background: #22c55e;
+    background: var(--swatch-green);
   }
 
   .color-purple,
   .status-pinned {
-    background: #8b5cf6;
+    background: var(--swatch-purple);
   }
 
   .color-cyan {
-    background: #06b6d4;
+    background: var(--swatch-cyan);
   }
 
   .color-orange,
   .status-needs-review {
-    background: #f97316;
+    background: var(--swatch-orange);
   }
 
   .color-pink {
-    background: #ec4899;
+    background: var(--swatch-pink);
   }
 
   .color-yellow,
   .status-waiting {
-    background: #eab308;
+    background: var(--swatch-yellow);
   }
 
   .color-red,
   .status-stale {
-    background: #ef4444;
+    background: var(--swatch-red);
   }
 
   .color-grey {
-    background: #94a3b8;
+    background: var(--swatch-grey);
   }
 
   .empty-state {
