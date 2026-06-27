@@ -543,7 +543,7 @@ async function listBrowserTabGroups(tabs: TabSnapshot[]): Promise<Map<number, Br
   }
 
   const windowId = tabs[0]?.windowId;
-  const groups = await api.query(typeof windowId === "number" ? { windowId } : {});
+  const groups = await Promise.resolve(api.query(typeof windowId === "number" ? { windowId } : {})).catch(() => []);
   return new Map(groups.filter((group) => typeof group.id === "number").map((group) => [group.id as number, group]));
 }
 
@@ -568,6 +568,14 @@ async function syncManagedGroupsWithBrowser(tabs: TabSnapshot[], groups: Managed
 
       const groupedTabs = tabsByBrowserGroup.get(group.browserGroupId) ?? [];
       const browserGroup = browserGroups.get(group.browserGroupId);
+      if (!browserGroup && groupedTabs.length === 0) {
+        const { browserGroupId: _browserGroupId, ...managedOnlyGroup } = group;
+        return {
+          ...managedOnlyGroup,
+          updatedAt: now,
+        };
+      }
+
       return {
         ...group,
         color: browserGroupColor(browserGroup?.color) || group.color,
@@ -631,7 +639,7 @@ async function updateTabGroup(groupId: number, title: string, color: string): Pr
     return;
   }
 
-  await api.update(groupId, { collapsed: false, color, title });
+  await Promise.resolve(api.update(groupId, { collapsed: false, color, title })).catch(() => undefined);
 }
 
 async function groupTabIds(tabIds: number[], title: string, color: string, groupId?: number): Promise<number | undefined> {
@@ -640,7 +648,9 @@ async function groupTabIds(tabIds: number[], title: string, color: string, group
     return undefined;
   }
 
-  const nextGroupId = await api.group({ tabIds, ...(typeof groupId === "number" ? { groupId } : {}) });
+  const nextGroupId = await Promise.resolve(
+    api.group({ tabIds, ...(typeof groupId === "number" ? { groupId } : {}) }),
+  ).catch(() => undefined);
   if (typeof nextGroupId === "number") {
     await updateTabGroup(nextGroupId, title, color);
     return nextGroupId;
