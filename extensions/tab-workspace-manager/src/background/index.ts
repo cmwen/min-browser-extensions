@@ -3,6 +3,8 @@ import {
   conversationFromTab,
   DEFAULT_CONFIG,
   domainKeyForUrl,
+  type FollowUpItem,
+  type FollowUpStatus,
   groupTabsByDomain,
   mergeConfig,
   pageSummaryDeepLink,
@@ -26,6 +28,7 @@ const CONFIG_KEY = "tabWorkspaceManager.config";
 const CONVERSATIONS_KEY = "tabWorkspaceManager.conversations";
 const MANAGED_GROUPS_KEY = "tabWorkspaceManager.managedGroups";
 const PINNED_SHORTCUTS_KEY = "tabWorkspaceManager.pinnedShortcuts";
+const FOLLOW_UP_ITEMS_KEY = "tabWorkspaceManager.followUps";
 const TAB_METADATA_KEY = "tabWorkspaceManager.tabMetadata";
 const PAGE_SUMMARY_CONTEXT_MENU_ID = "tab-workspace-manager.summarize-page";
 
@@ -148,6 +151,60 @@ async function getPinnedShortcuts(): Promise<PinnedPageShortcut[]> {
 
 async function savePinnedShortcuts(shortcuts: PinnedPageShortcut[]): Promise<void> {
   await webext.storage.local.set({ [PINNED_SHORTCUTS_KEY]: shortcuts });
+}
+
+function normalizeFollowUpStatus(item: FollowUpItem, now = Date.now()): FollowUpItem {
+  if ((item.status === "waiting" || item.status === "snoozed") && item.reminderAt && item.reminderAt <= now) {
+    return { ...item, status: "due", updatedAt: now };
+  }
+
+  return item;
+}
+
+function withoutLiveTabReference(item: FollowUpItem, updatedAt = Date.now()): FollowUpItem {
+  const { tabId: _tabId, windowId: _windowId, ...rest } = item;
+  return { ...rest, updatedAt };
+}
+
+function withLiveTabReference(item: FollowUpItem, tab: BrowserTab, updatedAt = Date.now()): FollowUpItem {
+  return {
+    ...item,
+    updatedAt,
+    ...(typeof tab.id === "number" ? { tabId: tab.id } : {}),
+    ...(typeof tab.windowId === "number" ? { windowId: tab.windowId } : {}),
+  };
+}
+
+async function getFollowUps(): Promise<FollowUpItem[]> {
+  const result = await webext.storage.local.get(FOLLOW_UP_ITEMS_KEY);
+  const value = result[FOLLOW_UP_ITEMS_KEY];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const now = Date.now();
+  const items = (value as FollowUpItem[]).map((item) => normalizeFollowUpStatus(item, now));
+  if (JSON.stringify(items) !== JSON.stringify(value)) {
+    await saveFollowUps(items);
+  }
+
+  return items;
+}
+
+async function saveFollowUps(items: FollowUpItem[]): Promise<void> {
+  await webext.storage.local.set({ [FOLLOW_UP_ITEMS_KEY]: items });
+}
+
+async function pruneFollowUps(tabs: TabSnapshot[]): Promise<FollowUpItem[]> {
+  const liveTabIds = new Set(tabs.map((tab) => tab.id));
+  const items = await getFollowUps();
+  const pruned = items.map((item) => (item.tabId && !liveTabIds.has(item.tabId) ? withoutLiveTabReference(item) : item));
+
+  if (JSON.stringify(pruned) !== JSON.stringify(items)) {
+    await saveFollowUps(pruned);
+  }
+
+  return pruned;
 }
 
 async function getTabMetadata(): Promise<Record<string, TabMetadata>> {
@@ -377,8 +434,9 @@ async function buildPanelState(): Promise<PanelState> {
   }));
   const conversations = await pruneConversations(tabs, config);
   const pinnedShortcuts = await getPinnedShortcuts();
+  const followUps = await pruneFollowUps(tabs);
 
-  return { config, conversations, managedGroups, pinnedShortcuts, tabs };
+  return { config, conversations, followUps, managedGroups, pinnedShortcuts, tabs };
 }
 
 async function updateTabGroup(groupId: number, title: string, color: string): Promise<void> {
@@ -575,6 +633,96 @@ async function closeTabs(tabIds: number[]): Promise<void> {
   );
   const conversations = await getConversations();
   await saveConversations(conversations.filter((conversation) => !uniqueTabIds.includes(conversation.tabId)));
+  const followUps = await getFollowUps();
+  await saveFollowUps(
+    followUps.map((item) =>
+      item.tabId && uniqueTabIds.includes(item.tabId) ? withoutLiveTabReference(item) : item,
+    ),
+  );
+  notifyPanelStateChanged();
+}
+
+async function addFollowUpFromTab(input: Extract<ExtensionMessage, { type: "ADD_FOLLOW_UP_FROM_TAB" }>): Promise<void> {
+  const config = await getConfig();
+  const tab = await webext.tabs.get(input.tabId);
+  const snapshot = snapshotTab(tab, config);
+  if (!snapshot) {
+    return;
+  }
+
+  const now = Date.now();
+  const status: FollowUpStatus = input.reminderAt && input.reminderAt <= now ? "due" : input.reminderAt ? "snoozed" : "waiting";
+  const nextItem: FollowUpItem = {
+    createdAt: now,
+    id: `follow-up:${snapshot.url}`,
+    source: input.source ?? "manual",
+    status,
+    tabId: snapshot.id,
+    title: snapshot.title,
+    updatedAt: now,
+    url: snapshot.url,
+    windowId: snapshot.windowId,
+    ...(snapshot.favIconUrl ? { favIconUrl: snapshot.favIconUrl } : {}),
+    ...(input.note?.trim() ? { note: input.note.trim() } : {}),
+    ...(input.reminderAt ? { reminderAt: input.reminderAt } : {}),
+  };
+
+  const items = await getFollowUps();
+  await saveFollowUps([nextItem, ...items.filter((item) => item.id !== nextItem.id)].slice(0, 200));
+
+  if (input.closeTab) {
+    await closeTabs([snapshot.id]);
+  } else {
+    notifyPanelStateChanged();
+  }
+}
+
+async function updateFollowUp(itemId: string, patch: Extract<ExtensionMessage, { type: "UPDATE_FOLLOW_UP" }>["patch"]): Promise<void> {
+  const items = await getFollowUps();
+  const now = Date.now();
+  await saveFollowUps(
+    items.map((item) => {
+      if (item.id !== itemId) {
+        return item;
+      }
+
+      return normalizeFollowUpStatus({
+        ...item,
+        updatedAt: now,
+        ...(patch.status ? { status: patch.status } : {}),
+        ...(typeof patch.reminderAt === "number" ? { reminderAt: patch.reminderAt } : {}),
+        ...(patch.note?.trim() ? { note: patch.note.trim() } : {}),
+      }, now);
+    }),
+  );
+  notifyPanelStateChanged();
+}
+
+async function openFollowUp(itemId: string): Promise<void> {
+  const items = await getFollowUps();
+  const item = items.find((candidate) => candidate.id === itemId);
+  if (!item) {
+    return;
+  }
+
+  if (typeof item.tabId === "number" && typeof item.windowId === "number") {
+    await focusTab(item.tabId, item.windowId).catch(async () => {
+      const tab = await webext.tabs.create({ active: true, url: item.url });
+      const now = Date.now();
+      await saveFollowUps(items.map((candidate) => candidate.id === itemId ? withLiveTabReference(candidate, tab, now) : candidate));
+    });
+  } else {
+    const tab = await webext.tabs.create({ active: true, url: item.url });
+    const now = Date.now();
+    await saveFollowUps(items.map((candidate) => candidate.id === itemId ? withLiveTabReference(candidate, tab, now) : candidate));
+  }
+
+  notifyPanelStateChanged();
+}
+
+async function removeFollowUp(itemId: string): Promise<void> {
+  const items = await getFollowUps();
+  await saveFollowUps(items.filter((item) => item.id !== itemId));
   notifyPanelStateChanged();
 }
 
@@ -715,6 +863,18 @@ async function handleMessage(message: ExtensionMessage, sender: MessageSender = 
         return { ok: true };
       case "CLOSE_TABS":
         await closeTabs(message.tabIds);
+        return { ok: true };
+      case "ADD_FOLLOW_UP_FROM_TAB":
+        await addFollowUpFromTab(message);
+        return { ok: true };
+      case "UPDATE_FOLLOW_UP":
+        await updateFollowUp(message.itemId, message.patch);
+        return { ok: true };
+      case "OPEN_FOLLOW_UP":
+        await openFollowUp(message.itemId);
+        return { ok: true };
+      case "REMOVE_FOLLOW_UP":
+        await removeFollowUp(message.itemId);
         return { ok: true };
       case "PIN_PAGE":
         await pinPage(message.tabId);

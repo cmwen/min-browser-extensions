@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  Archive,
+  Bell,
   Bot,
+  CheckCircle2,
   Clock3,
   FolderKanban,
   Globe2,
@@ -15,13 +18,21 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { DEFAULT_CONFIG, type AppConfig, type LlmConversationStatus, type TabSnapshot, type WorkspaceTemplate } from "@minext/core";
+import {
+  DEFAULT_CONFIG,
+  type AppConfig,
+  type FollowUpItem,
+  type FollowUpStatus,
+  type LlmConversationStatus,
+  type TabSnapshot,
+  type WorkspaceTemplate,
+} from "@minext/core";
 import { webext } from "@minext/browser-api";
 import type { ExtensionMessage, ExtensionResponse, PanelState, RuntimeEvent } from "../shared/messages";
 import "./styles.css";
 
 const root = document.getElementById("root");
-type PanelMode = "context" | "grouped";
+type PanelMode = "context" | "grouped" | "follow-up";
 
 if (!root) {
   throw new Error("Missing app root");
@@ -49,6 +60,21 @@ function statusLabel(status: LlmConversationStatus): string {
       return "Stale";
     case "active":
       return "Active";
+  }
+}
+
+function followUpStatusLabel(status: FollowUpStatus): string {
+  switch (status) {
+    case "needs-review":
+      return "Needs review";
+    case "snoozed":
+      return "Snoozed";
+    case "waiting":
+      return "Waiting";
+    case "done":
+      return "Done";
+    case "due":
+      return "Due";
   }
 }
 
@@ -104,6 +130,50 @@ function minutesAgo(timestamp: number | undefined): string {
   }
 
   return `${Math.round(minutes / 60)}h ago`;
+}
+
+function formatReminder(timestamp: number | undefined): string {
+  if (!timestamp) {
+    return "No reminder";
+  }
+
+  const diff = timestamp - Date.now();
+  const absolute = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(timestamp);
+  if (diff <= 0) {
+    return `Due ${absolute}`;
+  }
+
+  const minutes = Math.round(diff / 60_000);
+  if (minutes < 60) {
+    return `Due in ${minutes}m`;
+  }
+  if (minutes < 60 * 24) {
+    return `Due in ${Math.round(minutes / 60)}h`;
+  }
+
+  return `Due ${absolute}`;
+}
+
+function followUpSortValue(item: FollowUpItem): number {
+  const statusRank: Record<FollowUpStatus, number> = {
+    due: 0,
+    "needs-review": 1,
+    waiting: 2,
+    snoozed: 3,
+    done: 4,
+  };
+  return statusRank[item.status] * 10_000_000_000_000 + (item.reminderAt ?? item.updatedAt);
+}
+
+function reminderPreset(preset: "later" | "tomorrow" | "week"): number {
+  const now = Date.now();
+  if (preset === "later") {
+    return now + 3 * 60 * 60_000;
+  }
+  if (preset === "tomorrow") {
+    return now + 24 * 60 * 60_000;
+  }
+  return now + 7 * 24 * 60 * 60_000;
 }
 
 function scoreContextTab(input: {
@@ -208,6 +278,7 @@ function App(): React.ReactElement {
   const [state, setState] = useState<PanelState>({
     config: DEFAULT_CONFIG,
     conversations: [],
+    followUps: [],
     managedGroups: [],
     pinnedShortcuts: [],
     tabs: [],
@@ -468,6 +539,15 @@ function App(): React.ReactElement {
           >
             Grouped tabs
           </button>
+          <button
+            aria-selected={panelMode === "follow-up"}
+            className={panelMode === "follow-up" ? "is-selected" : ""}
+            role="tab"
+            type="button"
+            onClick={() => setPanelMode("follow-up")}
+          >
+            Follow-up
+          </button>
         </div>
 
         <PinnedShortcuts shortcuts={state.pinnedShortcuts} runAction={runAction} />
@@ -521,7 +601,7 @@ function App(): React.ReactElement {
             <EmptyState icon={<Search size={18} />} title="No tab matches" detail="Search checks tab titles and URLs across all tabs." />
           ) : null}
         </section>
-      ) : (
+      ) : panelMode === "grouped" ? (
         <GroupedTabsView
           conversationStatusByTabId={conversationStatusByTabId}
           filteredManagedGroups={filteredManagedGroups}
@@ -532,6 +612,8 @@ function App(): React.ReactElement {
           runAction={runAction}
           tabIdsByGroupId={tabIdsByGroupId}
         />
+      ) : (
+        <FollowUpView activeTab={activeTab} followUps={state.followUps} query={query} runAction={runAction} />
       )}
 
       <footer className="shortcut-footer">
@@ -614,6 +696,135 @@ function GroupedTabsView({
         ) : null}
       </section>
     </>
+  );
+}
+
+function FollowUpView({
+  activeTab,
+  followUps,
+  query,
+  runAction,
+}: {
+  activeTab: TabSnapshot | undefined;
+  followUps: FollowUpItem[];
+  query: string;
+  runAction: (message: ExtensionMessage) => Promise<void>;
+}): React.ReactElement {
+  const needle = query.trim().toLowerCase();
+  const visibleItems = followUps
+    .filter((item) => !needle || `${item.title} ${item.url} ${item.note ?? ""}`.toLowerCase().includes(needle))
+    .sort((a, b) => followUpSortValue(a) - followUpSortValue(b));
+  const activeItems = visibleItems.filter((item) => item.status !== "done");
+  const doneItems = visibleItems.filter((item) => item.status === "done").slice(0, 6);
+
+  return (
+    <section className="section-stack follow-up-section" aria-labelledby="follow-up-heading">
+      <div className="section-title">
+        <h2 id="follow-up-heading">Follow-up</h2>
+        <span>{activeItems.length}</span>
+      </div>
+
+      {activeTab ? (
+        <div className="follow-up-capture">
+          <button type="button" onClick={() => void runAction({ source: "manual", tabId: activeTab.id, type: "ADD_FOLLOW_UP_FROM_TAB" })}>
+            <Bell size={15} />
+            Save current
+          </button>
+          <button
+            type="button"
+            onClick={() => void runAction({
+              closeTab: true,
+              reminderAt: reminderPreset("tomorrow"),
+              source: "read-later",
+              tabId: activeTab.id,
+              type: "ADD_FOLLOW_UP_FROM_TAB",
+            })}
+          >
+            <Archive size={15} />
+            Save and close
+          </button>
+        </div>
+      ) : null}
+
+      {activeItems.length ? (
+        <div className="follow-up-list" role="list">
+          {activeItems.map((item) => (
+            <FollowUpRow key={item.id} item={item} runAction={runAction} />
+          ))}
+        </div>
+      ) : (
+        <EmptyState icon={<Bell size={18} />} title="No follow-ups yet" detail="Save tabs here when you want to come back later without keeping everything open." />
+      )}
+
+      {doneItems.length ? (
+        <details className="done-follow-ups">
+          <summary>Done items</summary>
+          <div className="follow-up-list" role="list">
+            {doneItems.map((item) => (
+              <FollowUpRow key={item.id} item={item} runAction={runAction} />
+            ))}
+          </div>
+        </details>
+      ) : null}
+    </section>
+  );
+}
+
+function FollowUpRow({
+  item,
+  runAction,
+}: {
+  item: FollowUpItem;
+  runAction: (message: ExtensionMessage) => Promise<void>;
+}): React.ReactElement {
+  return (
+    <article className={`follow-up-row status-${item.status}`} role="listitem">
+      <button className="follow-up-main" type="button" onClick={() => void runAction({ itemId: item.id, type: "OPEN_FOLLOW_UP" })}>
+        <span className="favicon" aria-hidden="true">
+          {item.favIconUrl ? <img src={item.favIconUrl} alt="" /> : <LayoutPanelLeft size={14} />}
+        </span>
+        <span className="tab-copy">
+          <strong>{item.title}</strong>
+          <small>{item.note || item.url}</small>
+        </span>
+      </button>
+      <span className={`tab-status-badge status-${item.status}`}>{followUpStatusLabel(item.status)}</span>
+      <small className="follow-up-time">{formatReminder(item.reminderAt)}</small>
+      <div className="follow-up-actions">
+        <button
+          className="row-icon-button"
+          type="button"
+          title="Snooze until tomorrow"
+          onClick={() => void runAction({ itemId: item.id, patch: { reminderAt: reminderPreset("tomorrow"), status: "snoozed" }, type: "UPDATE_FOLLOW_UP" })}
+        >
+          <Clock3 size={14} />
+        </button>
+        <button
+          className="row-icon-button"
+          type="button"
+          title="Needs review"
+          onClick={() => void runAction({ itemId: item.id, patch: { status: "needs-review" }, type: "UPDATE_FOLLOW_UP" })}
+        >
+          <Bell size={14} />
+        </button>
+        <button
+          className="row-icon-button"
+          type="button"
+          title="Mark done"
+          onClick={() => void runAction({ itemId: item.id, patch: { status: "done" }, type: "UPDATE_FOLLOW_UP" })}
+        >
+          <CheckCircle2 size={14} />
+        </button>
+        <button
+          className="row-icon-button"
+          type="button"
+          title="Remove follow-up"
+          onClick={() => void runAction({ itemId: item.id, type: "REMOVE_FOLLOW_UP" })}
+        >
+          <X size={14} />
+        </button>
+      </div>
+    </article>
   );
 }
 
@@ -719,6 +930,14 @@ function ContextRail({
           ) : null}
           {item.groupTitle ? <span className="tab-status-badge group-badge"><Layers2 size={11} />{item.groupTitle}</span> : null}
           <button
+            className="row-icon-button tab-follow-up-button"
+            type="button"
+            title="Save for follow-up"
+            onClick={() => void runAction({ source: "manual", tabId: tab.id, type: "ADD_FOLLOW_UP_FROM_TAB" })}
+          >
+            <Bell size={14} />
+          </button>
+          <button
             className="row-icon-button tab-pin-button"
             type="button"
             title="Save shortcut"
@@ -798,6 +1017,14 @@ function TabList({
                 {statusLabel(status)}
               </span>
             ) : null}
+            <button
+              className="row-icon-button tab-follow-up-button"
+              type="button"
+              title="Save for follow-up"
+              onClick={() => void runAction({ source: "manual", tabId: tab.id, type: "ADD_FOLLOW_UP_FROM_TAB" })}
+            >
+              <Bell size={14} />
+            </button>
             <button
               className="row-icon-button tab-pin-button"
               type="button"

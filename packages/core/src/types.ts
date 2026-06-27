@@ -23,6 +23,25 @@ export type PinnedPageShortcut = {
   url: string;
 };
 
+export type FollowUpStatus = "waiting" | "due" | "snoozed" | "needs-review" | "done";
+
+export type FollowUpSource = "manual" | "llm" | "read-later";
+
+export type FollowUpItem = {
+  createdAt: number;
+  favIconUrl?: string;
+  id: string;
+  note?: string;
+  reminderAt?: number;
+  source: FollowUpSource;
+  status: FollowUpStatus;
+  tabId?: number;
+  title: string;
+  updatedAt: number;
+  url: string;
+  windowId?: number;
+};
+
 export type ManagedGroupKind = "workspace" | "llm" | "domain" | "opener";
 
 export type ManagedTabGroup = {

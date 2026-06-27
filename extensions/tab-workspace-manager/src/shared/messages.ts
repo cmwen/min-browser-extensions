@@ -1,5 +1,8 @@
 import type {
   AppConfig,
+  FollowUpItem,
+  FollowUpSource,
+  FollowUpStatus,
   LlmConversation,
   LlmConversationStatus,
   ManagedTabGroupView,
@@ -11,9 +14,16 @@ import type {
 export type PanelState = {
   config: AppConfig;
   conversations: LlmConversation[];
+  followUps: FollowUpItem[];
   managedGroups: ManagedTabGroupView<TabSnapshot>[];
   pinnedShortcuts: PinnedPageShortcut[];
   tabs: TabSnapshot[];
+};
+
+export type FollowUpPatch = {
+  note?: string;
+  reminderAt?: number;
+  status?: FollowUpStatus;
 };
 
 export type ExtensionMessage =
@@ -24,6 +34,10 @@ export type ExtensionMessage =
   | { type: "OPEN_WORKSPACE"; workspace: WorkspaceTemplate }
   | { type: "OPEN_LLM_PROVIDER"; providerId: string }
   | { type: "CLOSE_TABS"; tabIds: number[] }
+  | { type: "ADD_FOLLOW_UP_FROM_TAB"; closeTab?: boolean; note?: string; reminderAt?: number; source?: FollowUpSource; tabId: number }
+  | { type: "UPDATE_FOLLOW_UP"; itemId: string; patch: FollowUpPatch }
+  | { type: "OPEN_FOLLOW_UP"; itemId: string }
+  | { type: "REMOVE_FOLLOW_UP"; itemId: string }
   | { type: "PIN_PAGE"; tabId: number }
   | { type: "OPEN_PINNED_SHORTCUT"; shortcutId: string }
   | { type: "REMOVE_PINNED_SHORTCUT"; shortcutId: string }
