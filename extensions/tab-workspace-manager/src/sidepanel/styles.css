@@ -1041,12 +1041,6 @@
     color: var(--status-success-text);
   }
 
-  .saved-badge,
-  .follow-up-badge {
-    background: color-mix(in srgb, var(--accent), transparent 88%);
-    color: var(--accent);
-  }
-
   .domain-group {
     background: var(--surface);
     border: 1px solid var(--border);

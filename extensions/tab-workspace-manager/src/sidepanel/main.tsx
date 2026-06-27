@@ -1265,8 +1265,6 @@ function ContextRail({
             </span>
           </button>
           {tab.pinned ? <span className="pin-badge">Pinned</span> : null}
-          {isShortcutSaved ? <span className="tab-status-badge saved-badge">Shortcut</span> : null}
-          {isFollowUpSaved ? <span className="tab-status-badge follow-up-badge">Follow-up</span> : null}
           {status ? (
             <span className={`tab-status-badge status-${status}`}>
               {statusLabel(status)}
@@ -1397,8 +1395,6 @@ function TabList({
               </span>
             </button>
             {tab.pinned ? <span className="pin-badge">Pinned</span> : null}
-            {isShortcutSaved ? <span className="tab-status-badge saved-badge">Shortcut</span> : null}
-            {isFollowUpSaved ? <span className="tab-status-badge follow-up-badge">Follow-up</span> : null}
             {status ? (
               <span className={`tab-status-badge status-${status}`}>
                 {statusLabel(status)}
