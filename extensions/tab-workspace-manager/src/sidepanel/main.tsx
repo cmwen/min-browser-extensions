@@ -410,7 +410,7 @@ function App(): React.ReactElement {
     tabs: [],
   });
   const [query, setQuery] = useState("");
-  const [panelMode, setPanelMode] = useState<PanelMode>("context");
+  const [panelMode, setPanelMode] = useState<PanelMode>("grouped");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [recentFollowUpTabIds, setRecentFollowUpTabIds] = useState<Set<number>>(() => new Set());
