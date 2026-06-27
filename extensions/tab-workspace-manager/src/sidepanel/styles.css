@@ -403,6 +403,17 @@
     position: absolute;
   }
 
+  .mode-toggle button.has-follow-ups::before {
+    background: var(--status-review-text);
+    border-radius: 999px;
+    block-size: 6px;
+    content: "";
+    inline-size: 6px;
+    inset-block-end: 5px;
+    inset-inline-end: 6px;
+    position: absolute;
+  }
+
   .tool-grid button,
   .llm-grid button {
     flex: 1;
@@ -741,38 +752,81 @@
     border-radius: 7px;
     display: grid;
     gap: 6px;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: 3px minmax(0, 1fr) auto;
     padding: 8px;
+  }
+
+  .follow-up-row::before {
+    align-self: stretch;
+    background: var(--border);
+    border-radius: 999px;
+    content: "";
+    grid-row: 1 / span 4;
+    inline-size: 3px;
   }
 
   .follow-up-row.status-due,
   .follow-up-row.status-needs-review {
-    border-color: color-mix(in srgb, var(--accent), var(--border) 48%);
+    border-color: color-mix(in srgb, var(--status-review-text), var(--border) 54%);
+  }
+
+  .follow-up-row.status-waiting {
+    border-color: color-mix(in srgb, var(--status-warning-text), var(--border) 64%);
+  }
+
+  .follow-up-row.status-snoozed {
+    border-color: color-mix(in srgb, var(--status-snoozed-text), var(--border) 64%);
+  }
+
+  .follow-up-row.status-done {
+    border-color: color-mix(in srgb, var(--status-success-text), var(--border) 64%);
+  }
+
+  .follow-up-row.status-due::before,
+  .follow-up-row.status-needs-review::before {
+    background: var(--status-review-text);
+  }
+
+  .follow-up-row.status-waiting::before {
+    background: var(--status-warning-text);
+  }
+
+  .follow-up-row.status-snoozed::before {
+    background: var(--status-snoozed-text);
+  }
+
+  .follow-up-row.status-done::before {
+    background: var(--status-success-text);
   }
 
   .follow-up-main {
     border: 0;
+    grid-column: 2;
     grid-template-columns: auto minmax(0, 1fr);
     min-block-size: 34px;
     padding: 0;
   }
 
+  .follow-up-row > .tab-status-badge {
+    grid-column: 3;
+  }
+
   .follow-up-time {
     color: var(--muted);
-    grid-column: 1 / -1;
+    grid-column: 2 / -1;
   }
 
   .follow-up-actions {
     display: flex;
     gap: 6px;
-    grid-column: 1 / -1;
+    grid-column: 2 / -1;
   }
 
   .follow-up-reminder-editor {
     align-items: end;
     display: grid;
     gap: 8px;
-    grid-column: 1 / -1;
+    grid-column: 2 / -1;
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
@@ -785,7 +839,7 @@
   }
 
   .follow-up-reminder-editor input {
-    background: var(--panel);
+    background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 6px;
     color: var(--text);
@@ -859,7 +913,8 @@
   }
 
   .tab-pin-button,
-  .tab-follow-up-button {
+  .tab-follow-up-button,
+  .context-hover-action {
     border-inline-width: 0;
     inline-size: 0;
     opacity: 0;
@@ -871,6 +926,10 @@
       opacity 120ms ease;
   }
 
+  .context-hover-action {
+    block-size: 34px;
+  }
+
   .tab-row:hover .tab-pin-button,
   .tab-row:focus-within .tab-pin-button,
   .context-tab-row:hover .tab-pin-button,
@@ -878,11 +937,47 @@
   .tab-row:hover .tab-follow-up-button,
   .tab-row:focus-within .tab-follow-up-button,
   .context-tab-row:hover .tab-follow-up-button,
-  .context-tab-row:focus-within .tab-follow-up-button {
+  .context-tab-row:focus-within .tab-follow-up-button,
+  .context-tab-row:hover .context-hover-action,
+  .context-tab-row:focus-within .context-hover-action,
+  .context-signal-details[open],
+  .tab-row .tab-pin-button.is-saved,
+  .tab-row .tab-follow-up-button.is-saved,
+  .tab-pin-button.is-confirming,
+  .tab-follow-up-button.is-confirming {
     border-inline-width: 1px;
     inline-size: 34px;
     opacity: 1;
     pointer-events: auto;
+  }
+
+  .row-icon-button.is-saved,
+  .row-icon-button.is-confirming {
+    background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent), var(--border) 42%);
+    color: var(--accent);
+  }
+
+  .row-icon-button.is-confirming svg {
+    animation: action-confirm 520ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .context-hover-action.context-signal-details[open] {
+    overflow: visible;
+  }
+
+  @keyframes action-confirm {
+    0% {
+      transform: scale(0.72);
+    }
+
+    55% {
+      transform: scale(1.16);
+    }
+
+    100% {
+      transform: scale(1);
+    }
   }
 
   .favicon {
@@ -944,6 +1039,12 @@
   .tab-status-badge.status-done {
     background: var(--status-success-bg);
     color: var(--status-success-text);
+  }
+
+  .saved-badge,
+  .follow-up-badge {
+    background: color-mix(in srgb, var(--accent), transparent 88%);
+    color: var(--accent);
   }
 
   .domain-group {
@@ -1018,17 +1119,17 @@
   }
 
   .color-blue,
-  .status-active {
+  .status-dot.status-active {
     background: var(--swatch-blue);
   }
 
   .color-green,
-  .status-responded {
+  .status-dot.status-responded {
     background: var(--swatch-green);
   }
 
   .color-purple,
-  .status-pinned {
+  .status-dot.status-pinned {
     background: var(--swatch-purple);
   }
 
@@ -1037,7 +1138,7 @@
   }
 
   .color-orange,
-  .status-needs-review {
+  .status-dot.status-needs-review {
     background: var(--swatch-orange);
   }
 
@@ -1046,12 +1147,12 @@
   }
 
   .color-yellow,
-  .status-waiting {
+  .status-dot.status-waiting {
     background: var(--swatch-yellow);
   }
 
   .color-red,
-  .status-stale {
+  .status-dot.status-stale {
     background: var(--swatch-red);
   }
 

@@ -411,6 +411,8 @@ function App(): React.ReactElement {
   const [panelMode, setPanelMode] = useState<PanelMode>("context");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [recentFollowUpTabIds, setRecentFollowUpTabIds] = useState<Set<number>>(() => new Set());
+  const [recentPinnedUrls, setRecentPinnedUrls] = useState<Set<string>>(() => new Set());
 
   const load = useCallback(async () => {
     const response = await sendMessage<{ ok: true; state: PanelState }>({ type: "GET_PANEL_STATE" });
@@ -496,6 +498,15 @@ function App(): React.ReactElement {
   const pinnedUrls = useMemo(
     () => new Set(state.pinnedShortcuts.map((shortcut) => shortcut.url)),
     [state.pinnedShortcuts],
+  );
+
+  const followUpUrls = useMemo(
+    () => new Set(state.followUps.filter((item) => item.status !== "done").map((item) => item.url)),
+    [state.followUps],
+  );
+  const activeFollowUpCount = useMemo(
+    () => state.followUps.filter((item) => item.status !== "done").length,
+    [state.followUps],
   );
 
   const hasSearchQuery = query.trim().length > 0;
@@ -610,6 +621,36 @@ function App(): React.ReactElement {
     [runAction, tuneWeightsForSelection],
   );
 
+  const saveTabForFollowUp = useCallback(
+    async (tab: TabSnapshot) => {
+      setRecentFollowUpTabIds((current) => new Set(current).add(tab.id));
+      await runAction({ source: "manual", tabId: tab.id, type: "ADD_FOLLOW_UP_FROM_TAB" });
+      window.setTimeout(() => {
+        setRecentFollowUpTabIds((current) => {
+          const next = new Set(current);
+          next.delete(tab.id);
+          return next;
+        });
+      }, 1_200);
+    },
+    [runAction],
+  );
+
+  const pinTabShortcut = useCallback(
+    async (tab: TabSnapshot) => {
+      setRecentPinnedUrls((current) => new Set(current).add(tab.url));
+      await runAction({ type: "PIN_PAGE", tabId: tab.id });
+      window.setTimeout(() => {
+        setRecentPinnedUrls((current) => {
+          const next = new Set(current);
+          next.delete(tab.url);
+          return next;
+        });
+      }, 1_200);
+    },
+    [runAction],
+  );
+
   return (
     <main className={`app-shell mode-${panelMode}`}>
       <header className="panel-header">
@@ -686,6 +727,7 @@ function App(): React.ReactElement {
             className={[
               panelMode === "follow-up" ? "is-selected" : "",
               suggestedMode.mode === "follow-up" ? "is-suggested" : "",
+              activeFollowUpCount > 0 ? "has-follow-ups" : "",
             ].filter(Boolean).join(" ")}
             role="tab"
             title={suggestedMode.mode === "follow-up" ? `Suggested: ${suggestedMode.reason}` : undefined}
@@ -739,8 +781,14 @@ function App(): React.ReactElement {
           {contextItems.length ? (
             <ContextRail
               conversationStatusByTabId={conversationStatusByTabId}
+              followUpUrls={followUpUrls}
               items={contextItems}
               onFocusTab={focusContextItem}
+              onPinTab={pinTabShortcut}
+              onSaveFollowUp={saveTabForFollowUp}
+              pinnedUrls={pinnedUrls}
+              recentFollowUpTabIds={recentFollowUpTabIds}
+              recentPinnedUrls={recentPinnedUrls}
               runAction={runAction}
             />
           ) : hasSearchQuery ? (
@@ -752,9 +800,15 @@ function App(): React.ReactElement {
           conversationStatusByTabId={conversationStatusByTabId}
           filteredManagedGroups={filteredManagedGroups}
           filteredTabs={filteredUngroupedTabs}
+          followUpUrls={followUpUrls}
           hasSearchQuery={hasSearchQuery}
           matchingGroupedTabCount={matchingGroupedTabCount}
           matchingTabCount={matchingTabCount}
+          onPinTab={pinTabShortcut}
+          onSaveFollowUp={saveTabForFollowUp}
+          pinnedUrls={pinnedUrls}
+          recentFollowUpTabIds={recentFollowUpTabIds}
+          recentPinnedUrls={recentPinnedUrls}
           runAction={runAction}
           tabIdsByGroupId={tabIdsByGroupId}
         />
@@ -774,18 +828,30 @@ function GroupedTabsView({
   conversationStatusByTabId,
   filteredManagedGroups,
   filteredTabs,
+  followUpUrls,
   hasSearchQuery,
   matchingGroupedTabCount,
   matchingTabCount,
+  onPinTab,
+  onSaveFollowUp,
+  pinnedUrls,
+  recentFollowUpTabIds,
+  recentPinnedUrls,
   runAction,
   tabIdsByGroupId,
 }: {
   conversationStatusByTabId: Map<number, LlmConversationStatus>;
   filteredManagedGroups: PanelState["managedGroups"];
   filteredTabs: TabSnapshot[];
+  followUpUrls: Set<string>;
   hasSearchQuery: boolean;
   matchingGroupedTabCount: number;
   matchingTabCount: number;
+  onPinTab: (tab: TabSnapshot) => Promise<void>;
+  onSaveFollowUp: (tab: TabSnapshot) => Promise<void>;
+  pinnedUrls: Set<string>;
+  recentFollowUpTabIds: Set<number>;
+  recentPinnedUrls: Set<string>;
   runAction: (message: ExtensionMessage) => Promise<void>;
   tabIdsByGroupId: Map<string, number[]>;
 }): React.ReactElement {
@@ -819,7 +885,17 @@ function GroupedTabsView({
                     <X size={14} />
                   </button>
                 </summary>
-                <TabList conversationStatusByTabId={conversationStatusByTabId} tabs={group.tabs} runAction={runAction} />
+                <TabList
+                  conversationStatusByTabId={conversationStatusByTabId}
+                  followUpUrls={followUpUrls}
+                  onPinTab={onPinTab}
+                  onSaveFollowUp={onSaveFollowUp}
+                  pinnedUrls={pinnedUrls}
+                  recentFollowUpTabIds={recentFollowUpTabIds}
+                  recentPinnedUrls={recentPinnedUrls}
+                  runAction={runAction}
+                  tabs={group.tabs}
+                />
               </details>
             ))
           ) : hasSearchQuery ? (
@@ -836,7 +912,17 @@ function GroupedTabsView({
           <span>{filteredTabs.length}</span>
         </div>
         {filteredTabs.length ? (
-          <TabList conversationStatusByTabId={conversationStatusByTabId} tabs={filteredTabs} runAction={runAction} />
+          <TabList
+            conversationStatusByTabId={conversationStatusByTabId}
+            followUpUrls={followUpUrls}
+            onPinTab={onPinTab}
+            onSaveFollowUp={onSaveFollowUp}
+            pinnedUrls={pinnedUrls}
+            recentFollowUpTabIds={recentFollowUpTabIds}
+            recentPinnedUrls={recentPinnedUrls}
+            runAction={runAction}
+            tabs={filteredTabs}
+          />
         ) : hasSearchQuery && matchingTabCount === 0 ? (
           <EmptyState icon={<Search size={18} />} title="No tab matches" detail="Search checks tab titles and URLs across groups and ungrouped tabs." />
         ) : null}
@@ -1088,13 +1174,25 @@ function WorkspaceButton({
 
 function ContextRail({
   conversationStatusByTabId,
+  followUpUrls,
   items,
   onFocusTab,
+  onPinTab,
+  onSaveFollowUp,
+  pinnedUrls,
+  recentFollowUpTabIds,
+  recentPinnedUrls,
   runAction,
 }: {
   conversationStatusByTabId: Map<number, LlmConversationStatus>;
+  followUpUrls: Set<string>;
   items: ContextTabItem[];
   onFocusTab: (item: ContextTabItem) => Promise<void>;
+  onPinTab: (tab: TabSnapshot) => Promise<void>;
+  onSaveFollowUp: (tab: TabSnapshot) => Promise<void>;
+  pinnedUrls: Set<string>;
+  recentFollowUpTabIds: Set<number>;
+  recentPinnedUrls: Set<string>;
   runAction: (message: ExtensionMessage) => Promise<void>;
 }): React.ReactElement {
   const activeItem = items.find((item) => item.slot === 0);
@@ -1128,6 +1226,10 @@ function ContextRail({
         const tab = item.tab;
         const status = conversationStatusByTabId.get(tab.id);
         const isStrong = item.relation.score >= 0.62 && item.slot !== 0;
+        const isFollowUpSaved = followUpUrls.has(tab.url);
+        const isFollowUpRecent = recentFollowUpTabIds.has(tab.id);
+        const isShortcutSaved = pinnedUrls.has(tab.url);
+        const isShortcutRecent = recentPinnedUrls.has(tab.url);
 
         return (
           <div
@@ -1163,6 +1265,8 @@ function ContextRail({
             </span>
           </button>
           {tab.pinned ? <span className="pin-badge">Pinned</span> : null}
+          {isShortcutSaved ? <span className="tab-status-badge saved-badge">Shortcut</span> : null}
+          {isFollowUpSaved ? <span className="tab-status-badge follow-up-badge">Follow-up</span> : null}
           {status ? (
             <span className={`tab-status-badge status-${status}`}>
               {statusLabel(status)}
@@ -1170,20 +1274,32 @@ function ContextRail({
           ) : null}
           {item.groupTitle ? <span className="tab-status-badge group-badge"><Layers2 size={11} />{item.groupTitle}</span> : null}
           <button
-            className="row-icon-button tab-follow-up-button"
+            className={[
+              "row-icon-button",
+              "context-hover-action",
+              "tab-follow-up-button",
+              isFollowUpSaved || isFollowUpRecent ? "is-saved" : "",
+              isFollowUpRecent ? "is-confirming" : "",
+            ].filter(Boolean).join(" ")}
             type="button"
-            title="Save for follow-up"
-            onClick={() => void runAction({ source: "manual", tabId: tab.id, type: "ADD_FOLLOW_UP_FROM_TAB" })}
+            title={isFollowUpSaved || isFollowUpRecent ? "Saved for follow-up" : "Save for follow-up"}
+            onClick={() => void onSaveFollowUp(tab)}
           >
-            <Bell size={14} />
+            {isFollowUpSaved || isFollowUpRecent ? <CheckCircle2 size={14} /> : <Bell size={14} />}
           </button>
           <button
-            className="row-icon-button tab-pin-button"
+            className={[
+              "row-icon-button",
+              "context-hover-action",
+              "tab-pin-button",
+              isShortcutSaved || isShortcutRecent ? "is-saved" : "",
+              isShortcutRecent ? "is-confirming" : "",
+            ].filter(Boolean).join(" ")}
             type="button"
-            title="Save shortcut"
-            onClick={() => void runAction({ type: "PIN_PAGE", tabId: tab.id })}
+            title={isShortcutSaved || isShortcutRecent ? "Shortcut saved" : "Save shortcut"}
+            onClick={() => void onPinTab(tab)}
           >
-            <Pin size={14} />
+            {isShortcutSaved || isShortcutRecent ? <CheckCircle2 size={14} /> : <Pin size={14} />}
           </button>
           <button
             className="row-icon-button"
@@ -1193,7 +1309,7 @@ function ContextRail({
           >
             <X size={14} />
           </button>
-          <details className="context-signal-details">
+          <details className="context-signal-details context-hover-action">
             <summary title="Show ranking signals">
               <Info size={13} />
             </summary>
@@ -1232,10 +1348,22 @@ function relationSummary(item: ContextTabItem, activeItem: ContextTabItem | unde
 
 function TabList({
   conversationStatusByTabId,
+  followUpUrls,
+  onPinTab,
+  onSaveFollowUp,
+  pinnedUrls,
+  recentFollowUpTabIds,
+  recentPinnedUrls,
   runAction,
   tabs,
 }: {
   conversationStatusByTabId: Map<number, LlmConversationStatus>;
+  followUpUrls: Set<string>;
+  onPinTab: (tab: TabSnapshot) => Promise<void>;
+  onSaveFollowUp: (tab: TabSnapshot) => Promise<void>;
+  pinnedUrls: Set<string>;
+  recentFollowUpTabIds: Set<number>;
+  recentPinnedUrls: Set<string>;
   runAction: (message: ExtensionMessage) => Promise<void>;
   tabs: TabSnapshot[];
 }): React.ReactElement {
@@ -1243,6 +1371,10 @@ function TabList({
     <div className="tab-list" role="list">
       {tabs.map((tab) => {
         const status = conversationStatusByTabId.get(tab.id);
+        const isFollowUpSaved = followUpUrls.has(tab.url);
+        const isFollowUpRecent = recentFollowUpTabIds.has(tab.id);
+        const isShortcutSaved = pinnedUrls.has(tab.url);
+        const isShortcutRecent = recentPinnedUrls.has(tab.url);
 
         return (
           <div
@@ -1265,26 +1397,38 @@ function TabList({
               </span>
             </button>
             {tab.pinned ? <span className="pin-badge">Pinned</span> : null}
+            {isShortcutSaved ? <span className="tab-status-badge saved-badge">Shortcut</span> : null}
+            {isFollowUpSaved ? <span className="tab-status-badge follow-up-badge">Follow-up</span> : null}
             {status ? (
               <span className={`tab-status-badge status-${status}`}>
                 {statusLabel(status)}
               </span>
             ) : null}
             <button
-              className="row-icon-button tab-follow-up-button"
+              className={[
+                "row-icon-button",
+                "tab-follow-up-button",
+                isFollowUpSaved || isFollowUpRecent ? "is-saved" : "",
+                isFollowUpRecent ? "is-confirming" : "",
+              ].filter(Boolean).join(" ")}
               type="button"
-              title="Save for follow-up"
-              onClick={() => void runAction({ source: "manual", tabId: tab.id, type: "ADD_FOLLOW_UP_FROM_TAB" })}
+              title={isFollowUpSaved || isFollowUpRecent ? "Saved for follow-up" : "Save for follow-up"}
+              onClick={() => void onSaveFollowUp(tab)}
             >
-              <Bell size={14} />
+              {isFollowUpSaved || isFollowUpRecent ? <CheckCircle2 size={14} /> : <Bell size={14} />}
             </button>
             <button
-              className="row-icon-button tab-pin-button"
+              className={[
+                "row-icon-button",
+                "tab-pin-button",
+                isShortcutSaved || isShortcutRecent ? "is-saved" : "",
+                isShortcutRecent ? "is-confirming" : "",
+              ].filter(Boolean).join(" ")}
               type="button"
-              title="Save shortcut"
-              onClick={() => void runAction({ type: "PIN_PAGE", tabId: tab.id })}
+              title={isShortcutSaved || isShortcutRecent ? "Shortcut saved" : "Save shortcut"}
+              onClick={() => void onPinTab(tab)}
             >
-              <Pin size={14} />
+              {isShortcutSaved || isShortcutRecent ? <CheckCircle2 size={14} /> : <Pin size={14} />}
             </button>
             <button
               className="row-icon-button"
