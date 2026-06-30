@@ -416,8 +416,33 @@ function App(): React.ReactElement {
   const [recentFollowUpTabIds, setRecentFollowUpTabIds] = useState<Set<number>>(() => new Set());
   const [recentPinnedUrls, setRecentPinnedUrls] = useState<Set<string>>(() => new Set());
 
+  const panelWindowMessage = useCallback(
+    (message: ExtensionMessage): ExtensionMessage => {
+      if (typeof state.windowId !== "number") {
+        return message;
+      }
+
+      switch (message.type) {
+        case "GET_PANEL_STATE":
+        case "GROUP_BY_DOMAIN":
+        case "OPEN_WORKSPACE":
+        case "OPEN_LLM_PROVIDER":
+        case "OPEN_FOLLOW_UP":
+        case "OPEN_PINNED_SHORTCUT":
+          return { ...message, windowId: state.windowId };
+        default:
+          return message;
+      }
+    },
+    [state.windowId],
+  );
+
   const load = useCallback(async () => {
-    const response = await sendMessage<{ ok: true; state: PanelState }>({ type: "GET_PANEL_STATE" });
+    const panelWindow = await webext.windows.getCurrent().catch(() => undefined);
+    const response = await sendMessage<{ ok: true; state: PanelState }>({
+      type: "GET_PANEL_STATE",
+      ...(typeof panelWindow?.id === "number" ? { windowId: panelWindow.id } : {}),
+    });
     setState(response.state);
     applyTheme(response.state.config);
   }, []);
@@ -510,6 +535,10 @@ function App(): React.ReactElement {
     () => state.followUps.filter((item) => item.status !== "done").length,
     [state.followUps],
   );
+  const attentionFollowUpCount = useMemo(
+    () => state.followUps.filter((item) => item.status === "due" || item.status === "needs-review").length,
+    [state.followUps],
+  );
 
   const hasSearchQuery = query.trim().length > 0;
 
@@ -578,7 +607,7 @@ function App(): React.ReactElement {
       setBusy(true);
       setError(undefined);
       try {
-        await sendMessage(message);
+        await sendMessage(panelWindowMessage(message));
         await load();
       } catch (actionError) {
         setError(actionError instanceof Error ? actionError.message : String(actionError));
@@ -586,7 +615,7 @@ function App(): React.ReactElement {
         setBusy(false);
       }
     },
-    [load],
+    [load, panelWindowMessage],
   );
 
   const tuneWeightsForSelection = useCallback(
@@ -730,9 +759,10 @@ function App(): React.ReactElement {
               panelMode === "follow-up" ? "is-selected" : "",
               suggestedMode.mode === "follow-up" ? "is-suggested" : "",
               activeFollowUpCount > 0 ? "has-follow-ups" : "",
+              attentionFollowUpCount > 0 ? "has-attention" : "",
             ].filter(Boolean).join(" ")}
             role="tab"
-            title={suggestedMode.mode === "follow-up" ? `Suggested: ${suggestedMode.reason}` : undefined}
+            title={attentionFollowUpCount > 0 ? `${attentionFollowUpCount} follow-up item${attentionFollowUpCount === 1 ? " needs" : "s need"} attention` : suggestedMode.mode === "follow-up" ? `Suggested: ${suggestedMode.reason}` : undefined}
             type="button"
             onClick={() => setPanelMode("follow-up")}
           >
@@ -954,6 +984,7 @@ function FollowUpView({
   const activeItems = visibleItems.filter((item) => item.status !== "done");
   const doneItems = visibleItems.filter((item) => item.status === "done").slice(0, 6);
   const cleanupCandidates = buildReadLaterCleanupCandidates({ followUps, query, tabs }).slice(0, 5);
+  const attentionItems = activeItems.filter((item) => item.status === "due" || item.status === "needs-review");
 
   const saveCleanupCandidates = async (candidates: ReadLaterCleanupCandidate[]) => {
     const itemIds = candidates.map((candidate) => followUpIdForUrl(candidate.tab.url));
@@ -975,6 +1006,14 @@ function FollowUpView({
         <h2 id="follow-up-heading">Follow-up</h2>
         <span>{activeItems.length}</span>
       </div>
+
+      {attentionItems.length ? (
+        <div className="attention-banner" role="status">
+          <Bell size={15} />
+          <strong>{attentionItems.length} {attentionItems.length === 1 ? "needs" : "need"} attention</strong>
+          <span>{attentionItems[0]?.title}</span>
+        </div>
+      ) : null}
 
       {activeTab ? (
         <div className="follow-up-capture">

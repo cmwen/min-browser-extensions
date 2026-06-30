@@ -420,7 +420,8 @@ async function importData(payload: unknown): Promise<void> {
 async function metadataForTabs(tabs: BrowserTab[]): Promise<Record<string, TabMetadata>> {
   const now = Date.now();
   const metadata = await getTabMetadata();
-  const liveTabIds = new Set(tabs.map((tab) => tab.id).filter((id): id is number => typeof id === "number").map(String));
+  const allTabs = await webext.tabs.query({}).catch(() => tabs);
+  const liveTabIds = new Set(allTabs.map((tab) => tab.id).filter((id): id is number => typeof id === "number").map(String));
   let changed = false;
 
   for (const tabId of Object.keys(metadata)) {
@@ -498,8 +499,28 @@ function snapshotTab(
   return snapshot;
 }
 
-async function listTabs(config: AppConfig): Promise<TabSnapshot[]> {
-  const tabs = await webext.tabs.query({ currentWindow: true });
+async function resolveWindowId(windowId: number | undefined): Promise<number | undefined> {
+  if (typeof windowId === "number") {
+    return windowId;
+  }
+
+  const [activeTab] = await webext.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+  if (typeof activeTab?.windowId === "number") {
+    return activeTab.windowId;
+  }
+
+  const currentWindow = await webext.windows.getCurrent().catch(() => undefined);
+  return typeof currentWindow?.id === "number" ? currentWindow.id : undefined;
+}
+
+async function listTabs(config: AppConfig, windowId?: number): Promise<TabSnapshot[]> {
+  const tabs = await webext.tabs.query(typeof windowId === "number" ? { windowId } : { currentWindow: true });
+  const metadata = await metadataForTabs(tabs);
+  return tabs.map((tab) => snapshotTab(tab, config, typeof tab.id === "number" ? metadata[String(tab.id)] : undefined)).filter((tab): tab is TabSnapshot => Boolean(tab));
+}
+
+async function listAllTabs(config: AppConfig): Promise<TabSnapshot[]> {
+  const tabs = await webext.tabs.query({});
   const metadata = await metadataForTabs(tabs);
   return tabs.map((tab) => snapshotTab(tab, config, typeof tab.id === "number" ? metadata[String(tab.id)] : undefined)).filter((tab): tab is TabSnapshot => Boolean(tab));
 }
@@ -513,10 +534,11 @@ function nextManagedGroup(
     kind: ManagedGroupKind;
     tabIds: number[];
     title: string;
+    windowId?: number;
   },
 ): ManagedTabGroup[] {
   const now = Date.now();
-  const existing = groups.find((group) => group.id === input.id);
+  const existing = groups.find((group) => group.id === input.id && group.windowId === input.windowId);
   const tabIds = [...new Set([...(existing?.tabIds ?? []), ...input.tabIds])];
   const browserGroupId = input.browserGroupId ?? existing?.browserGroupId;
   const next: ManagedTabGroup = {
@@ -527,10 +549,11 @@ function nextManagedGroup(
     tabIds,
     title: input.title,
     updatedAt: now,
+    ...(typeof input.windowId === "number" ? { windowId: input.windowId } : {}),
     ...(typeof browserGroupId === "number" ? { browserGroupId } : {}),
   };
 
-  return [next, ...groups.filter((group) => group.id !== input.id)];
+  return [next, ...groups.filter((group) => group.id !== input.id || group.windowId !== input.windowId)];
 }
 
 async function pruneManagedGroups(tabs: TabSnapshot[], groups?: ManagedTabGroup[]): Promise<ManagedTabGroup[]> {
@@ -567,6 +590,7 @@ async function syncManagedGroupsWithBrowser(tabs: TabSnapshot[], groups: Managed
   const browserGroups = await listBrowserTabGroups(tabs);
   const now = Date.now();
   const tabsByBrowserGroup = new Map<number, TabSnapshot[]>();
+  const scopedTabIds = new Set(tabs.map((tab) => tab.id));
 
   for (const tab of tabs) {
     if (typeof tab.groupId === "number" && tab.groupId >= 0) {
@@ -578,16 +602,22 @@ async function syncManagedGroupsWithBrowser(tabs: TabSnapshot[], groups: Managed
 
   const next = groups
     .map((group) => {
+      if (!group.tabIds.some((tabId) => scopedTabIds.has(tabId))) {
+        return group;
+      }
+
       if (typeof group.browserGroupId !== "number") {
         return group;
       }
 
+      const outsideScopedTabs = group.tabIds.filter((tabId) => !scopedTabIds.has(tabId));
       const groupedTabs = tabsByBrowserGroup.get(group.browserGroupId) ?? [];
       const browserGroup = browserGroups.get(group.browserGroupId);
       if (!browserGroup && groupedTabs.length === 0) {
         const { browserGroupId: _browserGroupId, ...managedOnlyGroup } = group;
         return {
           ...managedOnlyGroup,
+          tabIds: outsideScopedTabs,
           updatedAt: now,
         };
       }
@@ -595,7 +625,7 @@ async function syncManagedGroupsWithBrowser(tabs: TabSnapshot[], groups: Managed
       return {
         ...group,
         color: browserGroupColor(browserGroup?.color) || group.color,
-        tabIds: groupedTabs.map((tab) => tab.id),
+        tabIds: [...outsideScopedTabs, ...groupedTabs.map((tab) => tab.id)],
         title: browserGroup?.title?.trim() || group.title,
         updatedAt: now,
       };
@@ -617,6 +647,7 @@ async function syncManagedGroupsWithBrowser(tabs: TabSnapshot[], groups: Managed
       tabIds: groupedTabs.map((tab) => tab.id),
       title: browserGroup?.title?.trim() || "Browser group",
       updatedAt: now,
+      ...(typeof groupedTabs[0]?.windowId === "number" ? { windowId: groupedTabs[0].windowId } : {}),
     });
   }
 
@@ -634,19 +665,37 @@ async function addManagedGroup(input: Parameters<typeof nextManagedGroup>[1]): P
   return next;
 }
 
-async function buildPanelState(): Promise<PanelState> {
+function filterFollowUpsForWindow(items: FollowUpItem[], tabs: TabSnapshot[], windowId: number | undefined): FollowUpItem[] {
+  const tabIds = new Set(tabs.map((tab) => tab.id));
+  return items.filter((item) => {
+    if (typeof item.tabId === "number") {
+      return tabIds.has(item.tabId);
+    }
+
+    return typeof item.windowId !== "number" || item.windowId === windowId;
+  });
+}
+
+function groupIdForWindow(windowId: number | undefined, id: string): string {
+  return typeof windowId === "number" ? `window:${windowId}:${id}` : id;
+}
+
+async function buildPanelState(windowId?: number): Promise<PanelState> {
   const config = await getConfig();
-  const tabs = await listTabs(config);
-  const syncedGroups = await syncManagedGroupsWithBrowser(tabs, await pruneManagedGroups(tabs));
+  const targetWindowId = await resolveWindowId(windowId);
+  const tabs = await listTabs(config, targetWindowId);
+  const allTabs = await listAllTabs(config);
+  const tabIds = new Set(tabs.map((tab) => tab.id));
+  const syncedGroups = await syncManagedGroupsWithBrowser(tabs, await pruneManagedGroups(allTabs));
   const managedGroups = syncedGroups.map((group) => ({
     ...group,
     tabs: group.tabIds.map((tabId) => tabs.find((tab) => tab.id === tabId)).filter((tab): tab is TabSnapshot => Boolean(tab)),
-  }));
-  const conversations = await pruneConversations(tabs, config);
+  })).filter((group) => group.tabs.length > 0);
+  const conversations = (await pruneConversations(allTabs, config)).filter((conversation) => tabIds.has(conversation.tabId));
   const pinnedShortcuts = await getPinnedShortcuts();
-  const followUps = await pruneFollowUps(tabs);
+  const followUps = filterFollowUpsForWindow(await pruneFollowUps(allTabs), tabs, targetWindowId);
 
-  return { config, conversations, followUps, managedGroups, pinnedShortcuts, tabs };
+  return { config, conversations, followUps, managedGroups, pinnedShortcuts, tabs, ...(typeof targetWindowId === "number" ? { windowId: targetWindowId } : {}) };
 }
 
 async function updateTabGroup(groupId: number, title: string, color: string): Promise<void> {
@@ -675,9 +724,10 @@ async function groupTabIds(tabIds: number[], title: string, color: string, group
   return undefined;
 }
 
-async function groupCurrentWindowByDomain(): Promise<void> {
+async function groupCurrentWindowByDomain(windowId?: number): Promise<void> {
   const config = await getConfig();
-  const tabs = await listTabs(config);
+  const targetWindowId = await resolveWindowId(windowId);
+  const tabs = await listTabs(config, targetWindowId);
   const groups = groupTabsByDomain(tabs, config.grouping);
 
   await Promise.all(
@@ -686,22 +736,24 @@ async function groupCurrentWindowByDomain(): Promise<void> {
       const browserGroupId = await groupTabIds(tabIds, group.title, group.color);
       await addManagedGroup({
         color: group.color,
-        id: `domain:${group.domain}`,
+        id: groupIdForWindow(targetWindowId, `domain:${group.domain}`),
         kind: "domain",
         tabIds,
         title: group.title,
+        ...(typeof targetWindowId === "number" ? { windowId: targetWindowId } : {}),
         ...(typeof browserGroupId === "number" ? { browserGroupId } : {}),
       });
     }),
   );
 }
 
-async function openWorkspace(workspace: WorkspaceTemplate): Promise<void> {
+async function openWorkspace(workspace: WorkspaceTemplate, windowId?: number): Promise<void> {
   const sanitized = sanitizeWorkspace(workspace);
+  const targetWindowId = await resolveWindowId(windowId);
   const createdTabs: number[] = [];
 
   for (const url of sanitized.urls) {
-    const tab = await webext.tabs.create({ active: createdTabs.length === 0, url });
+    const tab = await webext.tabs.create({ active: createdTabs.length === 0, url, ...(typeof targetWindowId === "number" ? { windowId: targetWindowId } : {}) });
     if (typeof tab.id === "number") {
       createdTabs.push(tab.id);
     }
@@ -710,16 +762,18 @@ async function openWorkspace(workspace: WorkspaceTemplate): Promise<void> {
   const browserGroupId = await groupTabIds(createdTabs, sanitized.name, sanitized.color);
   await addManagedGroup({
     color: sanitized.color,
-    id: `workspace:${sanitized.id}`,
+    id: groupIdForWindow(targetWindowId, `workspace:${sanitized.id}`),
     kind: "workspace",
     tabIds: createdTabs,
     title: sanitized.name,
+    ...(typeof targetWindowId === "number" ? { windowId: targetWindowId } : {}),
     ...(typeof browserGroupId === "number" ? { browserGroupId } : {}),
   });
 }
 
-async function groupLlmTabs(config: AppConfig, extraTabs: TabSnapshot[] = []): Promise<void> {
-  const tabs = await listTabs(config);
+async function groupLlmTabs(config: AppConfig, extraTabs: TabSnapshot[] = [], windowId?: number): Promise<void> {
+  const targetWindowId = await resolveWindowId(windowId ?? extraTabs[0]?.windowId);
+  const tabs = await listTabs(config, targetWindowId);
   const llmTabs = [...tabs.filter((tab) => providerForUrl(tab.url, config.llmProviders)), ...extraTabs].filter(
     (tab, index, candidates) => candidates.findIndex((candidate) => candidate.id === tab.id) === index,
   );
@@ -739,29 +793,31 @@ async function groupLlmTabs(config: AppConfig, extraTabs: TabSnapshot[] = []): P
 
   await addManagedGroup({
     color: "purple",
-    id: "llm:workbench",
+    id: groupIdForWindow(targetWindowId, "llm:workbench"),
     kind: "llm",
     tabIds: llmTabs.map((tab) => tab.id),
     title,
+    ...(typeof targetWindowId === "number" ? { windowId: targetWindowId } : {}),
     ...(typeof browserGroupId === "number" ? { browserGroupId } : {}),
   });
 }
 
-async function openLlmProvider(providerId: string): Promise<void> {
+async function openLlmProvider(providerId: string, windowId?: number): Promise<void> {
   const config = await getConfig();
   const provider = config.llmProviders.find((candidate) => candidate.id === providerId && candidate.enabled);
   if (!provider) {
     throw new Error(`Unknown LLM provider: ${providerId}`);
   }
 
-  const tab = await webext.tabs.create({ active: true, url: provider.url });
+  const targetWindowId = await resolveWindowId(windowId);
+  const tab = await webext.tabs.create({ active: true, url: provider.url, ...(typeof targetWindowId === "number" ? { windowId: targetWindowId } : {}) });
   const snapshot = snapshotTab(tab, config);
   if (snapshot) {
     const conversations = await getConversations();
     await saveConversations([conversationFromTab(snapshot, provider, "waiting"), ...conversations].slice(0, 80));
   }
 
-  await groupLlmTabs(config, snapshot ? [snapshot] : []);
+  await groupLlmTabs(config, snapshot ? [snapshot] : [], targetWindowId);
   notifyPanelStateChanged();
 }
 
@@ -819,7 +875,7 @@ async function summarizePage(url: string | undefined): Promise<void> {
   if (snapshot) {
     const conversations = await getConversations();
     await saveConversations([conversationFromTab(snapshot, provider, "waiting"), ...conversations].slice(0, 80));
-    await groupLlmTabs(config, [snapshot]);
+    await groupLlmTabs(config, [snapshot], snapshot.windowId);
   }
 
   notifyPanelStateChanged();
@@ -910,7 +966,7 @@ async function updateFollowUp(itemId: string, patch: Extract<ExtensionMessage, {
   notifyPanelStateChanged();
 }
 
-async function openFollowUp(itemId: string): Promise<void> {
+async function openFollowUp(itemId: string, windowId?: number): Promise<void> {
   const items = await getFollowUps();
   const item = items.find((candidate) => candidate.id === itemId);
   if (!item) {
@@ -919,12 +975,14 @@ async function openFollowUp(itemId: string): Promise<void> {
 
   if (typeof item.tabId === "number" && typeof item.windowId === "number") {
     await focusTab(item.tabId, item.windowId).catch(async () => {
-      const tab = await webext.tabs.create({ active: true, url: item.url });
+      const targetWindowId = await resolveWindowId(windowId);
+      const tab = await webext.tabs.create({ active: true, url: item.url, ...(typeof targetWindowId === "number" ? { windowId: targetWindowId } : {}) });
       const now = Date.now();
       await saveFollowUps(items.map((candidate) => candidate.id === itemId ? withLiveTabReference(candidate, tab, now) : candidate));
     });
   } else {
-    const tab = await webext.tabs.create({ active: true, url: item.url });
+    const targetWindowId = await resolveWindowId(windowId);
+    const tab = await webext.tabs.create({ active: true, url: item.url, ...(typeof targetWindowId === "number" ? { windowId: targetWindowId } : {}) });
     const now = Date.now();
     await saveFollowUps(items.map((candidate) => candidate.id === itemId ? withLiveTabReference(candidate, tab, now) : candidate));
   }
@@ -958,14 +1016,15 @@ async function pinPage(tabId: number): Promise<void> {
   await savePinnedShortcuts([nextShortcut, ...shortcuts.filter((shortcut) => shortcut.id !== nextShortcut.id)].slice(0, 24));
 }
 
-async function openPinnedShortcut(shortcutId: string): Promise<void> {
+async function openPinnedShortcut(shortcutId: string, windowId?: number): Promise<void> {
   const shortcuts = await getPinnedShortcuts();
   const shortcut = shortcuts.find((candidate) => candidate.id === shortcutId);
   if (!shortcut) {
     return;
   }
 
-  await webext.tabs.create({ active: true, url: shortcut.url });
+  const targetWindowId = await resolveWindowId(windowId);
+  await webext.tabs.create({ active: true, url: shortcut.url, ...(typeof targetWindowId === "number" ? { windowId: targetWindowId } : {}) });
 }
 
 async function removePinnedShortcut(shortcutId: string): Promise<void> {
@@ -1003,6 +1062,7 @@ async function groupOpenedFromParent(tab: BrowserTab): Promise<void> {
     kind: openerGroup?.kind ?? "opener",
     tabIds,
     title,
+    ...(typeof tab.windowId === "number" ? { windowId: tab.windowId } : {}),
     ...(typeof browserGroupId === "number" ? { browserGroupId } : {}),
   });
 }
@@ -1058,7 +1118,7 @@ async function handleMessage(message: ExtensionMessage, sender: MessageSender = 
   try {
     switch (message.type) {
       case "GET_PANEL_STATE":
-        return { ok: true, state: await buildPanelState() };
+        return { ok: true, state: await buildPanelState(message.windowId) };
       case "GET_CONFIG":
         return { ok: true, config: await getConfig() };
       case "SAVE_CONFIG":
@@ -1073,13 +1133,13 @@ async function handleMessage(message: ExtensionMessage, sender: MessageSender = 
         notifyPanelStateChanged();
         return { ok: true };
       case "GROUP_BY_DOMAIN":
-        await groupCurrentWindowByDomain();
+        await groupCurrentWindowByDomain(message.windowId);
         return { ok: true };
       case "OPEN_WORKSPACE":
-        await openWorkspace(message.workspace);
+        await openWorkspace(message.workspace, message.windowId);
         return { ok: true };
       case "OPEN_LLM_PROVIDER":
-        await openLlmProvider(message.providerId);
+        await openLlmProvider(message.providerId, message.windowId);
         return { ok: true };
       case "CLOSE_TABS":
         await closeTabs(message.tabIds);
@@ -1091,7 +1151,7 @@ async function handleMessage(message: ExtensionMessage, sender: MessageSender = 
         await updateFollowUp(message.itemId, message.patch);
         return { ok: true };
       case "OPEN_FOLLOW_UP":
-        await openFollowUp(message.itemId);
+        await openFollowUp(message.itemId, message.windowId);
         return { ok: true };
       case "REMOVE_FOLLOW_UP":
         await removeFollowUp(message.itemId);
@@ -1100,7 +1160,7 @@ async function handleMessage(message: ExtensionMessage, sender: MessageSender = 
         await pinPage(message.tabId);
         return { ok: true };
       case "OPEN_PINNED_SHORTCUT":
-        await openPinnedShortcut(message.shortcutId);
+        await openPinnedShortcut(message.shortcutId, message.windowId);
         return { ok: true };
       case "REMOVE_PINNED_SHORTCUT":
         await removePinnedShortcut(message.shortcutId);
@@ -1194,19 +1254,15 @@ webext.tabs.onRemoved.addListener((tabId) => {
   ).finally(notifyPanelStateChanged);
 });
 
-webext.tabs.onActivated.addListener(() => {
-  void webext.tabs.query({ active: true, currentWindow: true }).then(async ([tab]) => {
-    if (typeof tab?.id !== "number") {
-      return;
-    }
-
+webext.tabs.onActivated.addListener((activeInfo) => {
+  void (async () => {
     const metadata = await getTabMetadata();
-    metadata[String(tab.id)] = {
-      openedAt: metadata[String(tab.id)]?.openedAt ?? Date.now(),
+    metadata[String(activeInfo.tabId)] = {
+      openedAt: metadata[String(activeInfo.tabId)]?.openedAt ?? Date.now(),
       lastActiveAt: Date.now(),
     };
     await saveTabMetadata(metadata);
-  }).catch(() => undefined);
+  })().catch(() => undefined);
   notifyPanelStateChanged();
 });
 

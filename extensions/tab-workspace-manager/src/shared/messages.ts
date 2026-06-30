@@ -19,6 +19,7 @@ export type PanelState = {
   managedGroups: ManagedTabGroupView<TabSnapshot>[];
   pinnedShortcuts: PinnedPageShortcut[];
   tabs: TabSnapshot[];
+  windowId?: number;
 };
 
 export type FollowUpPatch = {
@@ -42,21 +43,21 @@ export type ExportPayload = {
 };
 
 export type ExtensionMessage =
-  | { type: "GET_PANEL_STATE" }
+  | { type: "GET_PANEL_STATE"; windowId?: number }
   | { type: "GET_CONFIG" }
   | { type: "SAVE_CONFIG"; config: AppConfig }
   | { type: "EXPORT_DATA" }
   | { type: "IMPORT_DATA"; payload: unknown }
-  | { type: "GROUP_BY_DOMAIN" }
-  | { type: "OPEN_WORKSPACE"; workspace: WorkspaceTemplate }
-  | { type: "OPEN_LLM_PROVIDER"; providerId: string }
+  | { type: "GROUP_BY_DOMAIN"; windowId?: number }
+  | { type: "OPEN_WORKSPACE"; windowId?: number; workspace: WorkspaceTemplate }
+  | { type: "OPEN_LLM_PROVIDER"; providerId: string; windowId?: number }
   | { type: "CLOSE_TABS"; tabIds: number[] }
   | { type: "ADD_FOLLOW_UP_FROM_TAB"; closeTab?: boolean; note?: string; reminderAt?: number; source?: FollowUpSource; tabId: number }
   | { type: "UPDATE_FOLLOW_UP"; itemId: string; patch: FollowUpPatch }
-  | { type: "OPEN_FOLLOW_UP"; itemId: string }
+  | { type: "OPEN_FOLLOW_UP"; itemId: string; windowId?: number }
   | { type: "REMOVE_FOLLOW_UP"; itemId: string }
   | { type: "PIN_PAGE"; tabId: number }
-  | { type: "OPEN_PINNED_SHORTCUT"; shortcutId: string }
+  | { type: "OPEN_PINNED_SHORTCUT"; shortcutId: string; windowId?: number }
   | { type: "REMOVE_PINNED_SHORTCUT"; shortcutId: string }
   | { type: "LLM_ACTIVITY"; status: Extract<LlmConversationStatus, "active" | "waiting" | "responded">; title: string }
   | { type: "FOCUS_TAB"; tabId: number; windowId: number }

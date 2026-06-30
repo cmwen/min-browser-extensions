@@ -55,6 +55,7 @@ export type ManagedTabGroup = {
   tabIds: number[];
   title: string;
   updatedAt: number;
+  windowId?: number;
 };
 
 export type ManagedTabGroupView<TTab = TabSnapshot> = Omit<ManagedTabGroup, "tabIds"> & {

@@ -46,6 +46,8 @@
     --accent-soft: #d8f3ef;
     --danger: #b42318;
     --focus: #0e7490;
+    --attention: #dc2626;
+    --attention-soft: #fee2e2;
     --status-active-bg: #dbeafe;
     --status-active-text: #1d4ed8;
     --status-success-bg: #dcfce7;
@@ -81,6 +83,8 @@
       --accent-soft: #143b3a;
       --danger: #fb7185;
       --focus: #67e8f9;
+      --attention: #f97316;
+      --attention-soft: #431f0b;
       --status-active-bg: #172554;
       --status-active-text: #93c5fd;
       --status-success-bg: #12351f;
@@ -117,6 +121,8 @@
     --accent-soft: #d8f3ef;
     --danger: #b42318;
     --focus: #0e7490;
+    --attention: #dc2626;
+    --attention-soft: #fee2e2;
     --status-active-bg: #dbeafe;
     --status-active-text: #1d4ed8;
     --status-success-bg: #dcfce7;
@@ -152,6 +158,8 @@
     --accent-soft: #143b3a;
     --danger: #fb7185;
     --focus: #67e8f9;
+    --attention: #f97316;
+    --attention-soft: #431f0b;
     --status-active-bg: #172554;
     --status-active-text: #93c5fd;
     --status-success-bg: #12351f;
@@ -412,6 +420,12 @@
     inset-block-end: 5px;
     inset-inline-end: 6px;
     position: absolute;
+  }
+
+  .mode-toggle button.has-attention::before {
+    animation: attention-dot 1.15s ease-in-out infinite;
+    background: var(--attention);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--attention), transparent 78%);
   }
 
   .tool-grid button,
@@ -745,6 +759,39 @@
     gap: 8px;
   }
 
+  .attention-banner {
+    align-items: center;
+    animation: attention-panel 1.45s ease-in-out infinite;
+    background: color-mix(in srgb, var(--attention-soft), var(--surface) 28%);
+    border: 1px solid color-mix(in srgb, var(--attention), var(--border) 38%);
+    border-radius: 7px;
+    color: var(--text);
+    display: grid;
+    gap: 8px;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    margin-block-end: 10px;
+    min-block-size: 38px;
+    padding: 8px 10px;
+  }
+
+  .attention-banner svg {
+    color: var(--attention);
+  }
+
+  .attention-banner strong {
+    color: var(--attention);
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+
+  .attention-banner span {
+    color: var(--muted);
+    font-size: 0.75rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .follow-up-row {
     align-items: center;
     background: var(--surface);
@@ -767,7 +814,14 @@
 
   .follow-up-row.status-due,
   .follow-up-row.status-needs-review {
+    animation: attention-border 1.45s ease-in-out infinite;
+    background:
+      linear-gradient(var(--surface), var(--surface)) padding-box,
+      linear-gradient(135deg, var(--attention), var(--status-review-text), var(--attention)) border-box;
     border-color: color-mix(in srgb, var(--status-review-text), var(--border) 54%);
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--attention), transparent 68%),
+      0 0 0 2px color-mix(in srgb, var(--attention), transparent 86%);
   }
 
   .follow-up-row.status-waiting {
@@ -784,6 +838,7 @@
 
   .follow-up-row.status-due::before,
   .follow-up-row.status-needs-review::before {
+    animation: attention-rail 1.45s ease-in-out infinite;
     background: var(--status-review-text);
   }
 
@@ -977,6 +1032,56 @@
 
     100% {
       transform: scale(1);
+    }
+  }
+
+  @keyframes attention-border {
+    0%,
+    100% {
+      border-color: color-mix(in srgb, var(--attention), var(--border) 52%);
+      box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--attention), transparent 72%),
+        0 0 0 2px color-mix(in srgb, var(--attention), transparent 88%);
+    }
+
+    50% {
+      border-color: var(--attention);
+      box-shadow:
+        inset 0 0 0 1px color-mix(in srgb, var(--attention), transparent 42%),
+        0 0 0 4px color-mix(in srgb, var(--attention), transparent 76%);
+    }
+  }
+
+  @keyframes attention-panel {
+    0%,
+    100% {
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--attention), transparent 82%);
+    }
+
+    50% {
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--attention), transparent 76%);
+    }
+  }
+
+  @keyframes attention-dot {
+    0%,
+    100% {
+      transform: scale(1);
+    }
+
+    50% {
+      transform: scale(1.36);
+    }
+  }
+
+  @keyframes attention-rail {
+    0%,
+    100% {
+      opacity: 0.8;
+    }
+
+    50% {
+      opacity: 1;
     }
   }
 
@@ -1206,8 +1311,21 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .context-tab-row {
+    .context-tab-row,
+    .attention-banner,
+    .follow-up-row.status-due,
+    .follow-up-row.status-needs-review,
+    .follow-up-row.status-due::before,
+    .follow-up-row.status-needs-review::before,
+    .mode-toggle button.has-attention::before {
+      animation: none;
       transition-duration: 0.01ms;
+    }
+
+    .follow-up-row.status-due,
+    .follow-up-row.status-needs-review {
+      border-color: var(--attention);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--attention), transparent 56%);
     }
   }
 }
