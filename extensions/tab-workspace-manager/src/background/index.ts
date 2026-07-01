@@ -33,6 +33,7 @@ const TAB_METADATA_KEY = "tabWorkspaceManager.tabMetadata";
 const PAGE_SUMMARY_CONTEXT_MENU_ID = "tab-workspace-manager.summarize-page";
 const FOLLOW_UP_ALARM_PREFIX = "tabWorkspaceManager.followUp:";
 const FOLLOW_UP_NOTIFICATION_PREFIX = "tabWorkspaceManager.followUpNotification:";
+const BROWSER_GROUP_SYNC_GRACE_MS = 2_000;
 
 type NativeTabGroupApi = {
   tabs?: {
@@ -613,19 +614,24 @@ async function syncManagedGroupsWithBrowser(tabs: TabSnapshot[], groups: Managed
       const outsideScopedTabs = group.tabIds.filter((tabId) => !scopedTabIds.has(tabId));
       const groupedTabs = tabsByBrowserGroup.get(group.browserGroupId) ?? [];
       const browserGroup = browserGroups.get(group.browserGroupId);
+      const hasRecentManagedUpdate = now - group.updatedAt < BROWSER_GROUP_SYNC_GRACE_MS;
       if (!browserGroup && groupedTabs.length === 0) {
         const { browserGroupId: _browserGroupId, ...managedOnlyGroup } = group;
         return {
           ...managedOnlyGroup,
-          tabIds: outsideScopedTabs,
+          tabIds: hasRecentManagedUpdate ? group.tabIds : outsideScopedTabs,
           updatedAt: now,
         };
       }
 
+      const pendingManagedTabIds = hasRecentManagedUpdate
+        ? group.tabIds.filter((tabId) => scopedTabIds.has(tabId))
+        : [];
+
       return {
         ...group,
         color: browserGroupColor(browserGroup?.color) || group.color,
-        tabIds: [...outsideScopedTabs, ...groupedTabs.map((tab) => tab.id)],
+        tabIds: [...new Set([...outsideScopedTabs, ...pendingManagedTabIds, ...groupedTabs.map((tab) => tab.id)])],
         title: browserGroup?.title?.trim() || group.title,
         updatedAt: now,
       };
@@ -782,18 +788,21 @@ async function groupLlmTabs(config: AppConfig, extraTabs: TabSnapshot[] = [], wi
   }
 
   const title = config.llmProviders.find((provider) => provider.enabled)?.groupTitle ?? "LLM Workbench";
+  const managedGroupId = groupIdForWindow(targetWindowId, "llm:workbench");
+  const existingGroup = (await getManagedGroups()).find((group) => group.id === managedGroupId && group.windowId === targetWindowId);
   const browserGroupId =
     llmTabs.length > 1
       ? await groupTabIds(
           llmTabs.map((tab) => tab.id),
           title,
           "purple",
+          existingGroup?.browserGroupId,
         )
       : undefined;
 
   await addManagedGroup({
     color: "purple",
-    id: groupIdForWindow(targetWindowId, "llm:workbench"),
+    id: managedGroupId,
     kind: "llm",
     tabIds: llmTabs.map((tab) => tab.id),
     title,
