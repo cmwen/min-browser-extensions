@@ -138,6 +138,10 @@ const reminderApis = (): ReminderRuntimeApi => (globalThis as typeof globalThis 
 
 let panelRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 
+function notifyActiveMediaStarted(tabId: number): void {
+  void webext.runtime.sendMessage({ tabId, type: "MEDIA_PLAYING_IN_ACTIVE_TAB" } satisfies RuntimeEvent).catch(() => undefined);
+}
+
 function notifyPanelStateChanged(): void {
   if (panelRefreshTimer) {
     clearTimeout(panelRefreshTimer);
@@ -696,6 +700,58 @@ async function groupCurrentWindowByDomain(): Promise<void> {
   );
 }
 
+async function moveTabsToManagedGroup(tabIds: number[], groupId: string): Promise<void> {
+  const uniqueTabIds = [...new Set(tabIds)];
+  if (uniqueTabIds.length === 0) {
+    return;
+  }
+
+  const tabs = await listTabs(await getConfig());
+  const liveTabIds = new Set(tabs.map((tab) => tab.id));
+  const movableTabIds = uniqueTabIds.filter((tabId) => liveTabIds.has(tabId));
+  if (movableTabIds.length === 0) {
+    return;
+  }
+
+  const groups = await pruneManagedGroups(tabs);
+  const targetGroup = groups.find((group) => group.id === groupId);
+  if (!targetGroup) {
+    throw new Error("Target group no longer exists.");
+  }
+
+  const targetTabIds = [
+    ...new Set([...targetGroup.tabIds.filter((tabId) => liveTabIds.has(tabId)), ...movableTabIds]),
+  ];
+  const browserGroupId = await groupTabIds(
+    typeof targetGroup.browserGroupId === "number" ? movableTabIds : targetTabIds,
+    targetGroup.title,
+    targetGroup.color,
+    targetGroup.browserGroupId,
+  );
+  const now = Date.now();
+  const next = groups
+    .map((group) => {
+      if (group.id === targetGroup.id) {
+        return {
+          ...group,
+          tabIds: targetTabIds,
+          updatedAt: now,
+          ...(typeof browserGroupId === "number" ? { browserGroupId } : {}),
+        };
+      }
+
+      return {
+        ...group,
+        tabIds: group.tabIds.filter((tabId) => !movableTabIds.includes(tabId)),
+        updatedAt: group.tabIds.some((tabId) => movableTabIds.includes(tabId)) ? now : group.updatedAt,
+      };
+    })
+    .filter((group) => group.tabIds.length > 0);
+
+  await saveManagedGroups(next);
+  notifyPanelStateChanged();
+}
+
 async function openWorkspace(workspace: WorkspaceTemplate): Promise<void> {
   const sanitized = sanitizeWorkspace(workspace);
   const createdTabs: number[] = [];
@@ -727,18 +783,17 @@ async function groupLlmTabs(config: AppConfig, extraTabs: TabSnapshot[] = []): P
     return;
   }
 
-  const title = config.llmProviders.find((provider) => provider.enabled)?.groupTitle ?? "LLM Workbench";
-  const browserGroupId =
-    llmTabs.length > 1
-      ? await groupTabIds(
-          llmTabs.map((tab) => tab.id),
-          title,
-          "purple",
-        )
-      : undefined;
+  const existingGroup = (await getManagedGroups()).find((group) => group.id === "llm:workbench");
+  const color = existingGroup?.color ?? "purple";
+  const title = existingGroup?.title ?? config.llmProviders.find((provider) => provider.enabled)?.groupTitle ?? "LLM Workbench";
+  const tabIdsForBrowserGroup =
+    typeof existingGroup?.browserGroupId === "number"
+      ? llmTabs.filter((tab) => tab.groupId !== existingGroup.browserGroupId).map((tab) => tab.id)
+      : llmTabs.map((tab) => tab.id);
+  const browserGroupId = await groupTabIds(tabIdsForBrowserGroup, title, color, existingGroup?.browserGroupId);
 
   await addManagedGroup({
-    color: "purple",
+    color,
     id: "llm:workbench",
     kind: "llm",
     tabIds: llmTabs.map((tab) => tab.id),
@@ -1075,6 +1130,9 @@ async function handleMessage(message: ExtensionMessage, sender: MessageSender = 
       case "GROUP_BY_DOMAIN":
         await groupCurrentWindowByDomain();
         return { ok: true };
+      case "MOVE_TABS_TO_GROUP":
+        await moveTabsToManagedGroup(message.tabIds, message.groupId);
+        return { ok: true };
       case "OPEN_WORKSPACE":
         await openWorkspace(message.workspace);
         return { ok: true };
@@ -1167,6 +1225,14 @@ webext.tabs.onUpdated.addListener((tabId, changeInfo) => {
     void refreshConversationFromTab(tabId, changeInfo);
   }
 
+  if (changeInfo.audible === true) {
+    void webext.tabs.get(tabId).then((tab) => {
+      if (tab.active && tab.audible) {
+        notifyActiveMediaStarted(tabId);
+      }
+    }).catch(() => undefined);
+  }
+
   if (
     changeInfo.status ||
     changeInfo.title ||
@@ -1206,12 +1272,17 @@ webext.tabs.onActivated.addListener(() => {
       lastActiveAt: Date.now(),
     };
     await saveTabMetadata(metadata);
+
+    if (tab.audible) {
+      notifyActiveMediaStarted(tab.id);
+    }
   }).catch(() => undefined);
   notifyPanelStateChanged();
 });
 
 webext.runtime.onMessage.addListener((message: unknown, sender: unknown) => {
-  if ((message as RuntimeEvent).type === "PANEL_STATE_CHANGED") {
+  const runtimeEventType = (message as Partial<RuntimeEvent>).type;
+  if (runtimeEventType === "PANEL_STATE_CHANGED" || runtimeEventType === "MEDIA_PLAYING_IN_ACTIVE_TAB") {
     return undefined;
   }
 

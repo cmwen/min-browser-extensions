@@ -37,6 +37,12 @@ import "./styles.css";
 
 const root = document.getElementById("root");
 type PanelMode = "context" | "grouped" | "follow-up";
+type TabDragPayload = {
+  tabIds: number[];
+};
+
+const DEFAULT_PANEL_MODE: PanelMode = "grouped";
+const TAB_DRAG_MIME = "application/x-tab-workspace-manager-tabs";
 
 if (!root) {
   throw new Error("Missing app root");
@@ -221,6 +227,33 @@ function durationLabel(milliseconds: number): string {
 
 function isWebUrl(url: string): boolean {
   return url.startsWith("https://") || url.startsWith("http://");
+}
+
+function hasTabDragData(event: React.DragEvent): boolean {
+  return [...event.dataTransfer.types].includes(TAB_DRAG_MIME);
+}
+
+function writeTabDragData(event: React.DragEvent, tab: TabSnapshot): void {
+  const payload: TabDragPayload = { tabIds: [tab.id] };
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData(TAB_DRAG_MIME, JSON.stringify(payload));
+  event.dataTransfer.setData("text/plain", tab.title);
+}
+
+function readTabDragData(event: React.DragEvent): number[] {
+  const rawPayload = event.dataTransfer.getData(TAB_DRAG_MIME);
+  if (!rawPayload) {
+    return [];
+  }
+
+  try {
+    const payload = JSON.parse(rawPayload) as Partial<TabDragPayload>;
+    return Array.isArray(payload.tabIds)
+      ? payload.tabIds.filter((tabId): tabId is number => Number.isInteger(tabId))
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 function followUpIdForUrl(url: string): string {
@@ -410,7 +443,7 @@ function App(): React.ReactElement {
     tabs: [],
   });
   const [query, setQuery] = useState("");
-  const [panelMode, setPanelMode] = useState<PanelMode>("grouped");
+  const [panelMode, setPanelMode] = useState<PanelMode>(DEFAULT_PANEL_MODE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [recentFollowUpTabIds, setRecentFollowUpTabIds] = useState<Set<number>>(() => new Set());
@@ -429,7 +462,13 @@ function App(): React.ReactElement {
   useEffect(() => {
     let pending: number | undefined;
     const onMessage = (message: unknown) => {
-      if ((message as RuntimeEvent).type !== "PANEL_STATE_CHANGED") {
+      const runtimeEvent = message as RuntimeEvent;
+      if (runtimeEvent.type === "MEDIA_PLAYING_IN_ACTIVE_TAB") {
+        window.setTimeout(() => window.close(), 20);
+        return;
+      }
+
+      if (runtimeEvent.type !== "PANEL_STATE_CHANGED") {
         return;
       }
 
@@ -857,6 +896,30 @@ function GroupedTabsView({
   runAction: (message: ExtensionMessage) => Promise<void>;
   tabIdsByGroupId: Map<string, number[]>;
 }): React.ReactElement {
+  const [dropTargetGroupId, setDropTargetGroupId] = useState<string | undefined>();
+
+  const onGroupDragOver = (event: React.DragEvent, groupId: string) => {
+    if (!hasTabDragData(event)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDropTargetGroupId(groupId);
+  };
+
+  const onGroupDrop = (event: React.DragEvent, groupId: string) => {
+    const tabIds = readTabDragData(event);
+    if (tabIds.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    setDropTargetGroupId(undefined);
+    void runAction({ groupId, tabIds, type: "MOVE_TABS_TO_GROUP" });
+  };
+
   return (
     <>
       <section className="section-stack" aria-labelledby="managed-groups-heading">
@@ -867,8 +930,19 @@ function GroupedTabsView({
         <div className="domain-list">
           {filteredManagedGroups.length ? (
             filteredManagedGroups.map((group) => (
-              <details key={group.id} className="domain-group" open>
-                <summary>
+              <details
+                key={group.id}
+                className={dropTargetGroupId === group.id ? "domain-group is-drop-target" : "domain-group"}
+                open
+                onDragLeave={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                    setDropTargetGroupId(undefined);
+                  }
+                }}
+                onDragOver={(event) => onGroupDragOver(event, group.id)}
+                onDrop={(event) => onGroupDrop(event, group.id)}
+              >
+                <summary title={`Drop tabs onto ${group.title} to move them into this group`}>
                   <span className={`group-swatch color-${group.color}`} />
                   <span className="group-title-copy">
                     <strong>{group.title}</strong>
@@ -895,6 +969,7 @@ function GroupedTabsView({
                   pinnedUrls={pinnedUrls}
                   recentFollowUpTabIds={recentFollowUpTabIds}
                   recentPinnedUrls={recentPinnedUrls}
+                  draggableTabs
                   runAction={runAction}
                   tabs={group.tabs}
                 />
@@ -922,6 +997,7 @@ function GroupedTabsView({
             pinnedUrls={pinnedUrls}
             recentFollowUpTabIds={recentFollowUpTabIds}
             recentPinnedUrls={recentPinnedUrls}
+            draggableTabs
             runAction={runAction}
             tabs={filteredTabs}
           />
@@ -1363,6 +1439,7 @@ function relationSummary(item: ContextTabItem, activeItem: ContextTabItem | unde
 
 function TabList({
   conversationStatusByTabId,
+  draggableTabs = false,
   followUpUrls,
   onPinTab,
   onSaveFollowUp,
@@ -1373,6 +1450,7 @@ function TabList({
   tabs,
 }: {
   conversationStatusByTabId: Map<number, LlmConversationStatus>;
+  draggableTabs?: boolean;
   followUpUrls: Set<string>;
   onPinTab: (tab: TabSnapshot) => Promise<void>;
   onSaveFollowUp: (tab: TabSnapshot) => Promise<void>;
@@ -1395,6 +1473,18 @@ function TabList({
           <div
             key={tab.id}
             className={tab.active ? "tab-row is-active" : "tab-row"}
+            draggable={draggableTabs}
+            onDragEnd={(event) => {
+              event.currentTarget.classList.remove("is-dragging");
+            }}
+            onDragStart={(event) => {
+              if (!draggableTabs) {
+                return;
+              }
+
+              writeTabDragData(event, tab);
+              event.currentTarget.classList.add("is-dragging");
+            }}
             title={tab.url}
             role="listitem"
           >
