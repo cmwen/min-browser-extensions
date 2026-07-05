@@ -464,7 +464,13 @@ function App(): React.ReactElement {
     const onMessage = (message: unknown) => {
       const runtimeEvent = message as RuntimeEvent;
       if (runtimeEvent.type === "MEDIA_PLAYING_IN_ACTIVE_TAB") {
-        window.setTimeout(() => window.close(), 20);
+        void sendMessage({
+          tabId: runtimeEvent.tabId,
+          type: "PANEL_AUTOHIDDEN_FOR_MEDIA",
+          windowId: runtimeEvent.windowId,
+        }).catch(() => undefined).finally(() => {
+          window.setTimeout(() => window.close(), 20);
+        });
         return;
       }
 

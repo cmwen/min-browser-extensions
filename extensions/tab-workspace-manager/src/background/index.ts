@@ -127,6 +127,11 @@ type TabMetadata = {
   openedAt: number;
 };
 
+type AutohiddenMediaPanel = {
+  tabId: number;
+  windowId: number;
+};
+
 const nativeTabGroupApis = (): NativeTabGroupApi => {
   const runtime = globalThis as typeof globalThis & {
     browser?: NativeTabGroupApi;
@@ -137,9 +142,10 @@ const nativeTabGroupApis = (): NativeTabGroupApi => {
 const reminderApis = (): ReminderRuntimeApi => (globalThis as typeof globalThis & { chrome?: ReminderRuntimeApi }).chrome ?? (webext as ReminderRuntimeApi);
 
 let panelRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+let autohiddenMediaPanel: AutohiddenMediaPanel | undefined;
 
-function notifyActiveMediaStarted(tabId: number): void {
-  void webext.runtime.sendMessage({ tabId, type: "MEDIA_PLAYING_IN_ACTIVE_TAB" } satisfies RuntimeEvent).catch(() => undefined);
+function notifyActiveMediaStarted(tabId: number, windowId: number): void {
+  void webext.runtime.sendMessage({ tabId, type: "MEDIA_PLAYING_IN_ACTIVE_TAB", windowId } satisfies RuntimeEvent).catch(() => undefined);
 }
 
 function notifyPanelStateChanged(): void {
@@ -700,6 +706,23 @@ async function groupCurrentWindowByDomain(): Promise<void> {
   );
 }
 
+function rememberPanelAutoHiddenForMedia(tabId: number, windowId: number): void {
+  autohiddenMediaPanel = { tabId, windowId };
+}
+
+async function reopenPanelHiddenForMedia(tabId: number, fallbackWindowId: number): Promise<void> {
+  if (autohiddenMediaPanel?.tabId !== tabId) {
+    return;
+  }
+
+  const windowId = autohiddenMediaPanel.windowId ?? fallbackWindowId;
+  autohiddenMediaPanel = undefined;
+  const opened = await openExtensionPanel(windowId).catch(() => false);
+  if (opened) {
+    notifyPanelStateChanged();
+  }
+}
+
 async function moveTabsToManagedGroup(tabIds: number[], groupId: string): Promise<void> {
   const uniqueTabIds = [...new Set(tabIds)];
   if (uniqueTabIds.length === 0) {
@@ -1133,6 +1156,9 @@ async function handleMessage(message: ExtensionMessage, sender: MessageSender = 
       case "MOVE_TABS_TO_GROUP":
         await moveTabsToManagedGroup(message.tabIds, message.groupId);
         return { ok: true };
+      case "PANEL_AUTOHIDDEN_FOR_MEDIA":
+        rememberPanelAutoHiddenForMedia(message.tabId, message.windowId);
+        return { ok: true };
       case "OPEN_WORKSPACE":
         await openWorkspace(message.workspace);
         return { ok: true };
@@ -1227,8 +1253,8 @@ webext.tabs.onUpdated.addListener((tabId, changeInfo) => {
 
   if (changeInfo.audible === true) {
     void webext.tabs.get(tabId).then((tab) => {
-      if (tab.active && tab.audible) {
-        notifyActiveMediaStarted(tabId);
+      if (tab.active && tab.audible && typeof tab.windowId === "number") {
+        notifyActiveMediaStarted(tabId, tab.windowId);
       }
     }).catch(() => undefined);
   }
@@ -1250,7 +1276,8 @@ webext.tabs.onCreated.addListener((tab) => {
   void groupOpenedFromParent(tab).finally(notifyPanelStateChanged);
 });
 
-webext.tabs.onRemoved.addListener((tabId) => {
+webext.tabs.onRemoved.addListener((tabId, removeInfo) => {
+  void reopenPanelHiddenForMedia(tabId, removeInfo.windowId);
   void getManagedGroups().then((groups) =>
     saveManagedGroups(
       groups
@@ -1273,8 +1300,8 @@ webext.tabs.onActivated.addListener(() => {
     };
     await saveTabMetadata(metadata);
 
-    if (tab.audible) {
-      notifyActiveMediaStarted(tab.id);
+    if (tab.audible && typeof tab.windowId === "number") {
+      notifyActiveMediaStarted(tab.id, tab.windowId);
     }
   }).catch(() => undefined);
   notifyPanelStateChanged();
