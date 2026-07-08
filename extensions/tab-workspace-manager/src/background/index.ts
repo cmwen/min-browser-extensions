@@ -14,7 +14,6 @@ import {
   sanitizeWorkspace,
   statusForTabLoad,
   type AppConfig,
-  type BrowserGroupColor,
   type LlmConversation,
   type ManagedGroupKind,
   type ManagedTabGroup,
@@ -23,6 +22,11 @@ import {
   type WorkspaceTemplate,
 } from "@minext/core";
 import type { ExportPayload, ExtensionMessage, ExtensionResponse, PanelState, RuntimeEvent } from "../shared/messages";
+import {
+  collectLlmTabIds,
+  reconcileManagedGroupsWithBrowser,
+  type BrowserTabGroupState,
+} from "./group-state";
 
 const CONFIG_KEY = "tabWorkspaceManager.config";
 const CONVERSATIONS_KEY = "tabWorkspaceManager.conversations";
@@ -39,12 +43,20 @@ type NativeTabGroupApi = {
     group?: (options: { groupId?: number; tabIds: number[] }) => Promise<number> | number;
   };
   tabGroups?: {
-    query?: (options: { windowId?: number }) => Promise<BrowserTabGroup[]> | BrowserTabGroup[];
+    onCreated?: BrowserEvent;
+    onMoved?: BrowserEvent;
+    onRemoved?: BrowserEvent;
+    onUpdated?: BrowserEvent;
+    query?: (options: { windowId?: number }) => Promise<BrowserTabGroupState[]> | BrowserTabGroupState[];
     update?: (
       groupId: number,
       options: { collapsed?: boolean; color?: string; title?: string },
     ) => Promise<unknown> | unknown;
   };
+};
+
+type BrowserEvent = {
+  addListener: (listener: (...args: unknown[]) => void) => void;
 };
 
 type BrowserAlarm = {
@@ -83,13 +95,6 @@ type ReminderRuntimeApi = {
   };
 };
 
-type BrowserTabGroup = {
-  color?: string;
-  id?: number;
-  title?: string;
-  windowId?: number;
-};
-
 type BrowserTab = {
   active?: boolean;
   audible?: boolean;
@@ -100,6 +105,7 @@ type BrowserTab = {
     muted?: boolean;
   };
   openerTabId?: number;
+  pendingUrl?: string;
   pinned?: boolean;
   title?: string;
   url?: string;
@@ -470,11 +476,12 @@ function snapshotTab(
   config: AppConfig,
   metadata?: TabMetadata,
 ): TabSnapshot | undefined {
-  if (!tab || typeof tab.id !== "number" || typeof tab.windowId !== "number" || !tab.url) {
+  const url = tab?.url || tab?.pendingUrl;
+  if (!tab || typeof tab.id !== "number" || typeof tab.windowId !== "number" || !url) {
     return undefined;
   }
 
-  const rawTitle = tab.title ?? domainKeyForUrl(tab.url) ?? "Untitled";
+  const rawTitle = tab.title ?? domainKeyForUrl(url) ?? "Untitled";
   const snapshot: TabSnapshot = {
     active: Boolean(tab.active),
     ...(typeof tab.audible === "boolean" ? { audible: tab.audible } : {}),
@@ -482,7 +489,7 @@ function snapshotTab(
     ...(typeof tab.mutedInfo?.muted === "boolean" ? { muted: tab.mutedInfo.muted } : {}),
     pinned: Boolean(tab.pinned),
     title: rewritePageTitle(rawTitle, config.titleRewrite) || rawTitle,
-    url: tab.url,
+    url,
     windowId: tab.windowId,
   };
 
@@ -557,78 +564,24 @@ async function pruneManagedGroups(tabs: TabSnapshot[], groups?: ManagedTabGroup[
   return pruned;
 }
 
-function browserGroupColor(value: string | undefined): BrowserGroupColor {
-  const colors = new Set<BrowserGroupColor>(["grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange"]);
-  return colors.has(value as BrowserGroupColor) ? (value as BrowserGroupColor) : "grey";
-}
-
-async function listBrowserTabGroups(tabs: TabSnapshot[]): Promise<Map<number, BrowserTabGroup>> {
+async function listBrowserTabGroups(tabs: TabSnapshot[]): Promise<Map<number, BrowserTabGroupState> | undefined> {
   const api = nativeTabGroupApis().tabGroups;
   if (!api?.query) {
-    return new Map();
+    return undefined;
   }
 
   const windowId = tabs[0]?.windowId;
-  const groups = await Promise.resolve(api.query(typeof windowId === "number" ? { windowId } : {})).catch(() => []);
-  return new Map(groups.filter((group) => typeof group.id === "number").map((group) => [group.id as number, group]));
+  const groups = await Promise.resolve(api.query(typeof windowId === "number" ? { windowId } : {})).catch(
+    () => undefined,
+  );
+  return groups ? new Map(groups.map((group) => [group.id, group])) : undefined;
 }
 
 async function syncManagedGroupsWithBrowser(tabs: TabSnapshot[], groups: ManagedTabGroup[]): Promise<ManagedTabGroup[]> {
   const browserGroups = await listBrowserTabGroups(tabs);
-  const now = Date.now();
-  const tabsByBrowserGroup = new Map<number, TabSnapshot[]>();
-
-  for (const tab of tabs) {
-    if (typeof tab.groupId === "number" && tab.groupId >= 0) {
-      const groupedTabs = tabsByBrowserGroup.get(tab.groupId) ?? [];
-      groupedTabs.push(tab);
-      tabsByBrowserGroup.set(tab.groupId, groupedTabs);
-    }
-  }
-
-  const next = groups
-    .map((group) => {
-      if (typeof group.browserGroupId !== "number") {
-        return group;
-      }
-
-      const groupedTabs = tabsByBrowserGroup.get(group.browserGroupId) ?? [];
-      const browserGroup = browserGroups.get(group.browserGroupId);
-      if (!browserGroup && groupedTabs.length === 0) {
-        const { browserGroupId: _browserGroupId, ...managedOnlyGroup } = group;
-        return {
-          ...managedOnlyGroup,
-          updatedAt: now,
-        };
-      }
-
-      return {
-        ...group,
-        color: browserGroupColor(browserGroup?.color) || group.color,
-        tabIds: groupedTabs.map((tab) => tab.id),
-        title: browserGroup?.title?.trim() || group.title,
-        updatedAt: now,
-      };
-    })
-    .filter((group) => group.tabIds.length > 0);
-
-  for (const [browserGroupId, groupedTabs] of tabsByBrowserGroup.entries()) {
-    if (next.some((group) => group.browserGroupId === browserGroupId)) {
-      continue;
-    }
-
-    const browserGroup = browserGroups.get(browserGroupId);
-    next.push({
-      browserGroupId,
-      color: browserGroupColor(browserGroup?.color),
-      createdAt: now,
-      id: `browser-group:${browserGroupId}`,
-      kind: "domain",
-      tabIds: groupedTabs.map((tab) => tab.id),
-      title: browserGroup?.title?.trim() || "Browser group",
-      updatedAt: now,
-    });
-  }
+  const next = browserGroups
+    ? reconcileManagedGroupsWithBrowser(tabs, groups, browserGroups)
+    : await pruneManagedGroups(tabs, groups);
 
   if (JSON.stringify(next) !== JSON.stringify(groups)) {
     await saveManagedGroups(next);
@@ -647,7 +600,7 @@ async function addManagedGroup(input: Parameters<typeof nextManagedGroup>[1]): P
 async function buildPanelState(): Promise<PanelState> {
   const config = await getConfig();
   const tabs = await listTabs(config);
-  const syncedGroups = await syncManagedGroupsWithBrowser(tabs, await pruneManagedGroups(tabs));
+  const syncedGroups = await syncManagedGroupsWithBrowser(tabs, await getManagedGroups());
   const managedGroups = syncedGroups.map((group) => ({
     ...group,
     tabs: group.tabIds.map((tabId) => tabs.find((tab) => tab.id === tabId)).filter((tab): tab is TabSnapshot => Boolean(tab)),
@@ -797,29 +750,29 @@ async function openWorkspace(workspace: WorkspaceTemplate): Promise<void> {
   });
 }
 
-async function groupLlmTabs(config: AppConfig, extraTabs: TabSnapshot[] = []): Promise<void> {
+async function groupLlmTabs(config: AppConfig, explicitlyOpenedTabIds: number[] = []): Promise<void> {
   const tabs = await listTabs(config);
-  const llmTabs = [...tabs.filter((tab) => providerForUrl(tab.url, config.llmProviders)), ...extraTabs].filter(
-    (tab, index, candidates) => candidates.findIndex((candidate) => candidate.id === tab.id) === index,
-  );
-  if (llmTabs.length === 0) {
+  const llmTabIds = collectLlmTabIds(tabs, config.llmProviders, explicitlyOpenedTabIds);
+  if (llmTabIds.length === 0) {
     return;
   }
 
-  const existingGroup = (await getManagedGroups()).find((group) => group.id === "llm:workbench");
+  const groups = await syncManagedGroupsWithBrowser(tabs, await getManagedGroups());
+  const existingGroup = groups.find((group) => group.id === "llm:workbench");
   const color = existingGroup?.color ?? "purple";
   const title = existingGroup?.title ?? config.llmProviders.find((provider) => provider.enabled)?.groupTitle ?? "LLM Workbench";
+  const tabsById = new Map(tabs.map((tab) => [tab.id, tab]));
   const tabIdsForBrowserGroup =
     typeof existingGroup?.browserGroupId === "number"
-      ? llmTabs.filter((tab) => tab.groupId !== existingGroup.browserGroupId).map((tab) => tab.id)
-      : llmTabs.map((tab) => tab.id);
+      ? llmTabIds.filter((tabId) => tabsById.get(tabId)?.groupId !== existingGroup.browserGroupId)
+      : llmTabIds;
   const browserGroupId = await groupTabIds(tabIdsForBrowserGroup, title, color, existingGroup?.browserGroupId);
 
   await addManagedGroup({
     color,
     id: "llm:workbench",
     kind: "llm",
-    tabIds: llmTabs.map((tab) => tab.id),
+    tabIds: llmTabIds,
     title,
     ...(typeof browserGroupId === "number" ? { browserGroupId } : {}),
   });
@@ -839,7 +792,9 @@ async function openLlmProvider(providerId: string): Promise<void> {
     await saveConversations([conversationFromTab(snapshot, provider, "waiting"), ...conversations].slice(0, 80));
   }
 
-  await groupLlmTabs(config, snapshot ? [snapshot] : []);
+  if (typeof tab.id === "number") {
+    await groupLlmTabs(config, [tab.id]);
+  }
   notifyPanelStateChanged();
 }
 
@@ -897,7 +852,9 @@ async function summarizePage(url: string | undefined): Promise<void> {
   if (snapshot) {
     const conversations = await getConversations();
     await saveConversations([conversationFromTab(snapshot, provider, "waiting"), ...conversations].slice(0, 80));
-    await groupLlmTabs(config, [snapshot]);
+  }
+  if (typeof tab.id === "number") {
+    await groupLlmTabs(config, [tab.id]);
   }
 
   notifyPanelStateChanged();
@@ -1245,6 +1202,16 @@ webext.commands.onCommand.addListener((command) => {
     void groupCurrentWindowByDomain();
   }
 });
+
+const nativeTabGroupEvents = nativeTabGroupApis().tabGroups;
+for (const event of [
+  nativeTabGroupEvents?.onCreated,
+  nativeTabGroupEvents?.onMoved,
+  nativeTabGroupEvents?.onRemoved,
+  nativeTabGroupEvents?.onUpdated,
+]) {
+  event?.addListener(notifyPanelStateChanged);
+}
 
 webext.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status || changeInfo.title || changeInfo.url) {

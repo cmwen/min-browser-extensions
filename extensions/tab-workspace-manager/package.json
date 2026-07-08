@@ -10,6 +10,7 @@
     "build:firefox": "node scripts/build-extension.mjs firefox",
     "build:safari": "node scripts/build-extension.mjs safari",
     "dev": "vite --host 127.0.0.1",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "typecheck:native": "tsgo --noEmit -p tsconfig.json"
   },
