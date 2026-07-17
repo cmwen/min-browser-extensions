@@ -141,6 +141,24 @@ function hostForUrl(url: string): string {
   }
 }
 
+function usableFavIconUrl(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === "http:" || protocol === "https:" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function Favicon({ favIconUrl }: { favIconUrl: string | undefined }): React.ReactElement {
+  const src = usableFavIconUrl(favIconUrl);
+  return src ? <img src={src} alt="" /> : <LayoutPanelLeft size={14} />;
+}
+
 function minutesAgo(timestamp: number | undefined): string {
   if (!timestamp) {
     return "observed just now";
@@ -448,6 +466,7 @@ function App(): React.ReactElement {
   const [error, setError] = useState<string | undefined>();
   const [recentFollowUpTabIds, setRecentFollowUpTabIds] = useState<Set<number>>(() => new Set());
   const [recentPinnedUrls, setRecentPinnedUrls] = useState<Set<string>>(() => new Set());
+  const [keyboardNavigationActive, setKeyboardNavigationActive] = useState(false);
 
   const load = useCallback(async () => {
     const response = await sendMessage<{ ok: true; state: PanelState }>({ type: "GET_PANEL_STATE" });
@@ -463,17 +482,6 @@ function App(): React.ReactElement {
     let pending: number | undefined;
     const onMessage = (message: unknown) => {
       const runtimeEvent = message as RuntimeEvent;
-      if (runtimeEvent.type === "MEDIA_PLAYING_IN_ACTIVE_TAB") {
-        void sendMessage({
-          tabId: runtimeEvent.tabId,
-          type: "PANEL_AUTOHIDDEN_FOR_MEDIA",
-          windowId: runtimeEvent.windowId,
-        }).catch(() => undefined).finally(() => {
-          window.setTimeout(() => window.close(), 20);
-        });
-        return;
-      }
-
       if (runtimeEvent.type !== "PANEL_STATE_CHANGED") {
         return;
       }
@@ -495,27 +503,6 @@ function App(): React.ReactElement {
       webext.runtime.onMessage.removeListener(onMessage);
     };
   }, [load]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const mod = event.metaKey || event.ctrlKey;
-      if (mod && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        document.querySelector<HTMLInputElement>("#tab-search")?.focus();
-      }
-      if (mod && event.shiftKey && event.key.toLowerCase() === "g") {
-        event.preventDefault();
-        void runAction({ type: "GROUP_BY_DOMAIN" });
-      }
-      if (event.key === "Escape") {
-        setQuery("");
-        document.querySelector<HTMLInputElement>("#tab-search")?.blur();
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  });
 
   const conversationStatusByTabId = useMemo(
     () => new Map(state.conversations.map((conversation) => [conversation.tabId, conversation.status])),
@@ -634,6 +621,83 @@ function App(): React.ReactElement {
     [load],
   );
 
+  const keyboardShortcutByTabId = useMemo(() => {
+    const visibleTabs = panelMode === "context"
+      ? contextItems.map((item) => item.tab)
+      : panelMode === "grouped"
+        ? [...filteredManagedGroups.flatMap((group) => group.tabs), ...filteredUngroupedTabs]
+        : [];
+
+    return new Map(visibleTabs.slice(0, 9).map((tab, index) => [tab.id, index + 1]));
+  }, [contextItems, filteredManagedGroups, filteredUngroupedTabs, panelMode]);
+
+  useEffect(() => {
+    const tabButtons = (): HTMLButtonElement[] => [
+      ...document.querySelectorAll<HTMLButtonElement>("[data-tab-navigation-target='true']"),
+    ];
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (mod && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setKeyboardNavigationActive(true);
+        document.querySelector<HTMLInputElement>("#tab-search")?.focus();
+        return;
+      }
+
+      if (mod && event.shiftKey && event.key.toLowerCase() === "g") {
+        event.preventDefault();
+        void runAction({ type: "GROUP_BY_DOMAIN" });
+        return;
+      }
+
+      if (event.key === "Escape") {
+        setQuery("");
+        setKeyboardNavigationActive(false);
+        document.querySelector<HTMLInputElement>("#tab-search")?.blur();
+        return;
+      }
+
+      const shortcutMatch = /^Digit([1-9])$/.exec(event.code);
+      if (keyboardNavigationActive && event.altKey && !event.ctrlKey && !event.metaKey && shortcutMatch) {
+        event.preventDefault();
+        tabButtons()[Number(shortcutMatch[1]) - 1]?.click();
+        return;
+      }
+
+      if (event.altKey || event.ctrlKey || event.metaKey || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+        return;
+      }
+
+      const searchInput = document.querySelector<HTMLInputElement>("#tab-search");
+      const focusedElement = document.activeElement;
+      const currentIndex = tabButtons().findIndex((button) => button === focusedElement);
+      const isSearchFocused = focusedElement === searchInput;
+      if (!isSearchFocused && currentIndex === -1) {
+        return;
+      }
+
+      const buttons = tabButtons();
+      if (!buttons.length) {
+        return;
+      }
+
+      event.preventDefault();
+      setKeyboardNavigationActive(true);
+      const nextIndex = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? buttons.length - 1
+          : isSearchFocused
+            ? event.key === "ArrowDown" ? 0 : buttons.length - 1
+            : Math.max(0, Math.min(buttons.length - 1, currentIndex + (event.key === "ArrowDown" ? 1 : -1)));
+      buttons[nextIndex]?.focus();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [keyboardNavigationActive, runAction]);
+
   const tuneWeightsForSelection = useCallback(
     async (item: ContextTabItem) => {
       if (!state.config.contextMap.adaptiveLearning || item.tab.id === activeTab?.id) {
@@ -738,6 +802,7 @@ function App(): React.ReactElement {
             placeholder="Search tabs"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
+            onFocus={() => setKeyboardNavigationActive(true)}
           />
           <kbd>{navigator.platform.includes("Mac") ? "⌘K" : "Ctrl K"}</kbd>
         </label>
@@ -837,6 +902,8 @@ function App(): React.ReactElement {
               recentFollowUpTabIds={recentFollowUpTabIds}
               recentPinnedUrls={recentPinnedUrls}
               runAction={runAction}
+              keyboardShortcutByTabId={keyboardShortcutByTabId}
+              showKeyboardShortcuts={keyboardNavigationActive}
             />
           ) : hasSearchQuery ? (
             <EmptyState icon={<Search size={18} />} title="No tab matches" detail="Search checks tab titles and URLs across all tabs." />
@@ -858,6 +925,8 @@ function App(): React.ReactElement {
           recentPinnedUrls={recentPinnedUrls}
           runAction={runAction}
           tabIdsByGroupId={tabIdsByGroupId}
+          keyboardShortcutByTabId={keyboardShortcutByTabId}
+          showKeyboardShortcuts={keyboardNavigationActive}
         />
       ) : (
         <FollowUpView activeTab={activeTab} followUps={state.followUps} query={query} runAction={runAction} tabs={state.tabs} />
@@ -865,7 +934,7 @@ function App(): React.ReactElement {
 
       <footer className="shortcut-footer">
         <Keyboard size={14} />
-        <span>{navigator.platform.includes("Mac") ? "Cmd" : "Ctrl"}+K search, {navigator.platform.includes("Mac") ? "Cmd" : "Ctrl"}+Shift+G group</span>
+        <span>{navigator.platform.includes("Mac") ? "Cmd" : "Ctrl"}+K search · ↑↓ navigate · {navigator.platform.includes("Mac") ? "Option" : "Alt"}+1–9 open</span>
       </footer>
     </main>
   );
@@ -886,6 +955,8 @@ function GroupedTabsView({
   recentPinnedUrls,
   runAction,
   tabIdsByGroupId,
+  keyboardShortcutByTabId,
+  showKeyboardShortcuts,
 }: {
   conversationStatusByTabId: Map<number, LlmConversationStatus>;
   filteredManagedGroups: PanelState["managedGroups"];
@@ -901,6 +972,8 @@ function GroupedTabsView({
   recentPinnedUrls: Set<string>;
   runAction: (message: ExtensionMessage) => Promise<void>;
   tabIdsByGroupId: Map<string, number[]>;
+  keyboardShortcutByTabId: Map<number, number>;
+  showKeyboardShortcuts: boolean;
 }): React.ReactElement {
   const [dropTargetGroupId, setDropTargetGroupId] = useState<string | undefined>();
 
@@ -976,7 +1049,9 @@ function GroupedTabsView({
                   recentFollowUpTabIds={recentFollowUpTabIds}
                   recentPinnedUrls={recentPinnedUrls}
                   draggableTabs
+                  keyboardShortcutByTabId={keyboardShortcutByTabId}
                   runAction={runAction}
+                  showKeyboardShortcuts={showKeyboardShortcuts}
                   tabs={group.tabs}
                 />
               </details>
@@ -1004,7 +1079,9 @@ function GroupedTabsView({
             recentFollowUpTabIds={recentFollowUpTabIds}
             recentPinnedUrls={recentPinnedUrls}
             draggableTabs
+            keyboardShortcutByTabId={keyboardShortcutByTabId}
             runAction={runAction}
+            showKeyboardShortcuts={showKeyboardShortcuts}
             tabs={filteredTabs}
           />
         ) : hasSearchQuery && matchingTabCount === 0 ? (
@@ -1092,7 +1169,7 @@ function FollowUpView({
             {cleanupCandidates.map((candidate) => (
               <div key={candidate.tab.id} className="cleanup-candidate-row" role="listitem">
                 <span className="favicon" aria-hidden="true">
-                  {candidate.tab.favIconUrl ? <img src={candidate.tab.favIconUrl} alt="" /> : <LayoutPanelLeft size={14} />}
+                  <Favicon favIconUrl={candidate.tab.favIconUrl} />
                 </span>
                 <span className="tab-copy">
                   <strong>{candidate.tab.title}</strong>
@@ -1170,7 +1247,7 @@ function FollowUpRow({
     <article className={`follow-up-row status-${item.status}`} role="listitem">
       <button className="follow-up-main" type="button" onClick={() => void runAction({ itemId: item.id, type: "OPEN_FOLLOW_UP" })}>
         <span className="favicon" aria-hidden="true">
-          {item.favIconUrl ? <img src={item.favIconUrl} alt="" /> : <LayoutPanelLeft size={14} />}
+          <Favicon favIconUrl={item.favIconUrl} />
         </span>
         <span className="tab-copy">
           <strong>{item.title}</strong>
@@ -1281,6 +1358,8 @@ function ContextRail({
   recentFollowUpTabIds,
   recentPinnedUrls,
   runAction,
+  keyboardShortcutByTabId,
+  showKeyboardShortcuts,
 }: {
   conversationStatusByTabId: Map<number, LlmConversationStatus>;
   followUpUrls: Set<string>;
@@ -1292,26 +1371,13 @@ function ContextRail({
   recentFollowUpTabIds: Set<number>;
   recentPinnedUrls: Set<string>;
   runAction: (message: ExtensionMessage) => Promise<void>;
+  keyboardShortcutByTabId: Map<number, number>;
+  showKeyboardShortcuts: boolean;
 }): React.ReactElement {
   const activeItem = items.find((item) => item.slot === 0);
 
-  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Home") {
-      return;
-    }
-
-    event.preventDefault();
-    const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(".context-tab-main")];
-    const currentIndex = buttons.findIndex((button) => button === document.activeElement);
-    const nextIndex =
-      event.key === "Home"
-        ? buttons.findIndex((button) => button.dataset.slot === "0")
-        : Math.max(0, Math.min(buttons.length - 1, currentIndex + (event.key === "ArrowDown" ? 1 : -1)));
-    buttons[nextIndex]?.focus();
-  };
-
   return (
-    <div className="context-rail" role="list" onKeyDown={onKeyDown} aria-label="Tabs related to the active tab">
+    <div className="context-rail" role="list" aria-label="Tabs related to the active tab">
       <div className="context-axis context-axis-time" aria-hidden="true">
         <Clock3 size={13} />
         Opened near this tab
@@ -1328,6 +1394,7 @@ function ContextRail({
         const isFollowUpRecent = recentFollowUpTabIds.has(tab.id);
         const isShortcutSaved = pinnedUrls.has(tab.url);
         const isShortcutRecent = recentPinnedUrls.has(tab.url);
+        const keyboardShortcut = keyboardShortcutByTabId.get(tab.id);
 
         return (
           <div
@@ -1350,17 +1417,19 @@ function ContextRail({
             {isStrong ? <span className="connection-line" aria-hidden="true" /> : null}
           <button
             className="context-tab-main"
+            data-tab-navigation-target="true"
             data-slot={item.slot}
             type="button"
             onClick={() => void onFocusTab(item)}
           >
             <span className="favicon" aria-hidden="true">
-              {tab.favIconUrl ? <img src={tab.favIconUrl} alt="" /> : <LayoutPanelLeft size={14} />}
+              <Favicon favIconUrl={tab.favIconUrl} />
             </span>
             <span className="tab-copy">
               <strong>{tab.title}</strong>
               <small>{tab.active ? "Current tab" : relationSummary(item, activeItem)}</small>
             </span>
+            {showKeyboardShortcuts && keyboardShortcut ? <kbd className="tab-jump-shortcut" aria-hidden="true">{keyboardShortcut}</kbd> : null}
           </button>
           <MediaBadge tab={tab} />
           {tab.pinned ? <span className="pin-badge">Pinned</span> : null}
@@ -1454,6 +1523,8 @@ function TabList({
   recentPinnedUrls,
   runAction,
   tabs,
+  keyboardShortcutByTabId,
+  showKeyboardShortcuts,
 }: {
   conversationStatusByTabId: Map<number, LlmConversationStatus>;
   draggableTabs?: boolean;
@@ -1465,6 +1536,8 @@ function TabList({
   recentPinnedUrls: Set<string>;
   runAction: (message: ExtensionMessage) => Promise<void>;
   tabs: TabSnapshot[];
+  keyboardShortcutByTabId: Map<number, number>;
+  showKeyboardShortcuts: boolean;
 }): React.ReactElement {
   return (
     <div className="tab-list" role="list">
@@ -1474,6 +1547,7 @@ function TabList({
         const isFollowUpRecent = recentFollowUpTabIds.has(tab.id);
         const isShortcutSaved = pinnedUrls.has(tab.url);
         const isShortcutRecent = recentPinnedUrls.has(tab.url);
+        const keyboardShortcut = keyboardShortcutByTabId.get(tab.id);
 
         return (
           <div
@@ -1496,16 +1570,18 @@ function TabList({
           >
             <button
               className="tab-main"
+              data-tab-navigation-target="true"
               type="button"
               onClick={() => void runAction({ type: "FOCUS_TAB", tabId: tab.id, windowId: tab.windowId })}
             >
               <span className="favicon" aria-hidden="true">
-                {tab.favIconUrl ? <img src={tab.favIconUrl} alt="" /> : <LayoutPanelLeft size={14} />}
+                <Favicon favIconUrl={tab.favIconUrl} />
               </span>
               <span className="tab-copy">
                 <strong>{tab.title}</strong>
                 <small>{tab.url}</small>
               </span>
+              {showKeyboardShortcuts && keyboardShortcut ? <kbd className="tab-jump-shortcut" aria-hidden="true">{keyboardShortcut}</kbd> : null}
             </button>
             <MediaBadge tab={tab} />
             {tab.pinned ? <span className="pin-badge">Pinned</span> : null}
@@ -1576,7 +1652,7 @@ function PinnedShortcuts({
             title={shortcut.title}
             onClick={() => void runAction({ type: "OPEN_PINNED_SHORTCUT", shortcutId: shortcut.id })}
           >
-            {shortcut.favIconUrl ? <img src={shortcut.favIconUrl} alt="" /> : <LayoutPanelLeft size={14} />}
+            <Favicon favIconUrl={shortcut.favIconUrl} />
           </button>
           <button
             className="shortcut-remove"

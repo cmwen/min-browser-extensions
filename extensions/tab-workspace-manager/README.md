@@ -146,8 +146,10 @@ Safari:
 
 ## Keyboard
 
-- Browser command: `Ctrl+Shift+Period` or `Command+Shift+Period` opens the side panel where supported.
+- Browser command: `Activate extension` opens the side panel where supported. Assign its key in `chrome://extensions/shortcuts`; it uses the extension toolbar action, which Chrome permits to open a side panel.
 - Browser command: `Ctrl+Shift+G` or `Command+Shift+G` groups tabs by domain.
 - Panel shortcut: `Ctrl+K` or `Command+K` focuses search.
 - Panel shortcut: `Ctrl+Shift+G` or `Command+Shift+G` groups tabs by domain.
+- With search focused, `ArrowUp` and `ArrowDown` move through the visible tabs; `Home` and `End` jump to the first or last tab.
+- While navigating by keyboard, the first nine visible tabs (including tabs inside groups) show a number. Press `Alt+1` through `Alt+9` (`Option` on macOS) to open that tab. Chrome reserves `Ctrl/Command+number` for its own tab switching.
 - `Escape` clears search and releases focus.
