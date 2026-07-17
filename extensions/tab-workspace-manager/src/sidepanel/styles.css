@@ -586,7 +586,7 @@
     color: var(--text);
     display: grid;
     gap: 8px;
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
     min-block-size: 46px;
     padding: 8px 10px;
     text-align: start;
@@ -699,6 +699,16 @@
   .tab-main {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .tab-jump-shortcut {
+    align-self: center;
+    background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent), transparent 45%);
+    color: var(--accent);
+    font-weight: 760;
+    min-inline-size: 22px;
+    text-align: center;
   }
 
   .tab-row.is-active .tab-main {
