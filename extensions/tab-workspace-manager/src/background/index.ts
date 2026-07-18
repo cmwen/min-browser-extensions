@@ -525,8 +525,8 @@ function snapshotTab(
   return snapshot;
 }
 
-async function listTabs(config: AppConfig): Promise<TabSnapshot[]> {
-  const tabs = await webext.tabs.query({ currentWindow: true });
+async function listTabs(config: AppConfig, windowId?: number): Promise<TabSnapshot[]> {
+  const tabs = await webext.tabs.query(typeof windowId === "number" ? { windowId } : { currentWindow: true });
   const metadata = await metadataForTabs(tabs);
   return tabs.map((tab) => snapshotTab(tab, config, typeof tab.id === "number" ? metadata[String(tab.id)] : undefined)).filter((tab): tab is TabSnapshot => Boolean(tab));
 }
@@ -661,9 +661,9 @@ async function addManagedGroup(input: Parameters<typeof nextManagedGroup>[1]): P
   return next;
 }
 
-async function buildPanelState(): Promise<PanelState> {
+async function buildPanelState(windowId: number): Promise<PanelState> {
   const config = await getConfig();
-  const tabs = await listTabs(config);
+  const tabs = await listTabs(config, windowId);
   const syncedGroups = await syncManagedGroupsWithBrowser(tabs, await pruneManagedGroups(tabs));
   const managedGroups = syncedGroups.map((group) => ({
     ...group,
@@ -1174,7 +1174,7 @@ async function handleMessage(message: ExtensionMessage, sender: MessageSender = 
   try {
     switch (message.type) {
       case "GET_PANEL_STATE":
-        return { ok: true, state: await buildPanelState() };
+        return { ok: true, state: await buildPanelState(message.windowId) };
       case "GET_CONFIG":
         return { ok: true, config: await getConfig() };
       case "SAVE_CONFIG":

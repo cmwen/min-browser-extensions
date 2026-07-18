@@ -42,7 +42,7 @@ export type ExportPayload = {
 };
 
 export type ExtensionMessage =
-  | { type: "GET_PANEL_STATE" }
+  | { type: "GET_PANEL_STATE"; windowId: number }
   | { type: "GET_CONFIG" }
   | { type: "SAVE_CONFIG"; config: AppConfig }
   | { type: "EXPORT_DATA" }

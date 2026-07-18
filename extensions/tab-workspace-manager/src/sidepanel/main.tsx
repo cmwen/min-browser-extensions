@@ -469,7 +469,15 @@ function App(): React.ReactElement {
   const [keyboardNavigationActive, setKeyboardNavigationActive] = useState(false);
 
   const load = useCallback(async () => {
-    const response = await sendMessage<{ ok: true; state: PanelState }>({ type: "GET_PANEL_STATE" });
+    const currentWindow = await webext.windows.getCurrent();
+    if (typeof currentWindow.id !== "number") {
+      throw new Error("Could not identify the browser window for this panel.");
+    }
+
+    const response = await sendMessage<{ ok: true; state: PanelState }>({
+      type: "GET_PANEL_STATE",
+      windowId: currentWindow.id,
+    });
     setState(response.state);
     applyTheme(response.state.config);
   }, []);
