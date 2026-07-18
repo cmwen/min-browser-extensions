@@ -136,10 +136,15 @@ export type ContextMapConfig = {
   weights: RelationshipWeights;
 };
 
+export type PanelBehaviorConfig = {
+  autoHideWhenActiveTabPlaysMedia: boolean;
+};
+
 export type AppConfig = {
   contextMap: ContextMapConfig;
   grouping: GroupingRules;
   llmProviders: LlmProvider[];
+  panel: PanelBehaviorConfig;
   pageSummary: PageSummaryConfig;
   schemaVersion: number;
   theme: ThemeMode;

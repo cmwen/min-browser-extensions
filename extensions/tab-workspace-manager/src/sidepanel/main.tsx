@@ -507,6 +507,10 @@ function App(): React.ReactElement {
         event.preventDefault();
         void runAction({ type: "GROUP_BY_DOMAIN" });
       }
+      if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && /^Digit[1-9]$/.test(event.code)) {
+        event.preventDefault();
+        void runAction({ position: Number(event.code.slice(-1)), type: "FOCUS_GROUP_TAB" });
+      }
       if (event.key === "Escape") {
         setQuery("");
         document.querySelector<HTMLInputElement>("#tab-search")?.blur();

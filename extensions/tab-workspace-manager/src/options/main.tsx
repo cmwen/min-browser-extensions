@@ -355,6 +355,27 @@ function App(): React.ReactElement {
       </section>
 
       <section className="settings-section">
+        <h2>Panel behavior</h2>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={config.panel.autoHideWhenActiveTabPlaysMedia}
+            onChange={(event) => {
+              setConfig((current) => ({
+                ...current,
+                panel: { ...current.panel, autoHideWhenActiveTabPlaysMedia: event.target.checked },
+              }));
+              setStatus("Unsaved changes.");
+            }}
+          />
+          <span>
+            Hide the panel while the active tab plays media
+            <small>Uses the browser's media-playing signal. The panel remains hidden until you open it again.</small>
+          </span>
+        </label>
+      </section>
+
+      <section className="settings-section">
         <h2>Context map ranking</h2>
         <label className="toggle-row">
           <input

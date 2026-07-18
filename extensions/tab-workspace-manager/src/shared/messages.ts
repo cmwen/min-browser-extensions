@@ -50,6 +50,7 @@ export type ExtensionMessage =
   | { type: "GROUP_BY_DOMAIN" }
   | { type: "MOVE_TABS_TO_GROUP"; groupId: string; tabIds: number[] }
   | { type: "PANEL_AUTOHIDDEN_FOR_MEDIA"; tabId: number; windowId: number }
+  | { type: "FOCUS_GROUP_TAB"; position: number }
   | { type: "OPEN_WORKSPACE"; workspace: WorkspaceTemplate }
   | { type: "OPEN_LLM_PROVIDER"; providerId: string }
   | { type: "CLOSE_TABS"; tabIds: number[] }

@@ -1,6 +1,7 @@
 import browser from "webextension-polyfill";
 
 type SidePanelApi = {
+  close?: (options: { tabId?: number; windowId?: number }) => Promise<void> | void;
   open?: (options?: { windowId?: number }) => Promise<void> | void;
   setPanelBehavior?: (options: { openPanelOnActionClick: boolean }) => Promise<void> | void;
 };
@@ -40,7 +41,16 @@ export async function openExtensionPanel(windowId?: number): Promise<boolean> {
   return true;
 }
 
+export async function closeExtensionPanel(windowId?: number): Promise<boolean> {
+  const sidePanel = getSidePanelApi();
+  if (!sidePanel?.close || typeof windowId !== "number") {
+    return false;
+  }
+
+  await sidePanel.close({ windowId });
+  return true;
+}
+
 export function isExtensionPage(url: string | undefined): boolean {
   return Boolean(url?.startsWith(browser.runtime.getURL("")));
 }
-

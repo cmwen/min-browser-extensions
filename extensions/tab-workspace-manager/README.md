@@ -85,6 +85,7 @@ The side panel also listens for real tab title, URL, favicon, activation, remova
 - Workspace templates: configure names, colors, and URLs.
 - LLM shortcuts: enable or disable providers.
 - Domain grouping: configure minimum tabs, excluded domains, and opener-tab auto grouping.
+- Panel behavior: optionally hide the panel when the active tab starts playing media.
 - Title cleanup: add contains or regex replacement rules for panel titles. Rules run only when title cleanup is enabled.
 - Import and export: move configuration between browsers or profiles.
 
@@ -148,6 +149,7 @@ Safari:
 
 - Browser command: `Ctrl+Shift+Period` or `Command+Shift+Period` opens the side panel where supported.
 - Browser command: `Ctrl+Shift+G` or `Command+Shift+G` groups tabs by domain.
+- Panel shortcut: `Alt+1` through `Alt+9` (Option on macOS) focuses the corresponding tab in the active managed group. If the active tab is ungrouped, it uses LLM Workbench when present. The nine named commands can also be assigned browser-wide in the browser's extension shortcut settings.
 - Panel shortcut: `Ctrl+K` or `Command+K` focuses search.
 - Panel shortcut: `Ctrl+Shift+G` or `Command+Shift+G` groups tabs by domain.
 - `Escape` clears search and releases focus.

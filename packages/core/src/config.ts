@@ -87,6 +87,9 @@ export const DEFAULT_CONFIG: AppConfig = {
     minimumTabsPerGroup: 2,
   },
   llmProviders: DEFAULT_LLM_PROVIDERS,
+  panel: {
+    autoHideWhenActiveTabPlaysMedia: false,
+  },
   pageSummary: {
     providerId: "auto",
   },
@@ -129,6 +132,10 @@ export function mergeConfig(value: Partial<AppConfig> | undefined): AppConfig {
       excludedDomains: value.grouping?.excludedDomains ?? DEFAULT_CONFIG.grouping.excludedDomains,
     },
     llmProviders: mergeLlmProviders(value.llmProviders),
+    panel: {
+      ...DEFAULT_CONFIG.panel,
+      ...value.panel,
+    },
     pageSummary: {
       ...DEFAULT_CONFIG.pageSummary,
       ...value.pageSummary,

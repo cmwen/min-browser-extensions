@@ -44,7 +44,16 @@
         "default": "Ctrl+Shift+G",
         "mac": "Command+Shift+G"
       }
-    }
+    },
+    "focus-group-tab-1": { "description": "Focus first tab in the active group" },
+    "focus-group-tab-2": { "description": "Focus second tab in the active group" },
+    "focus-group-tab-3": { "description": "Focus third tab in the active group" },
+    "focus-group-tab-4": { "description": "Focus fourth tab in the active group" },
+    "focus-group-tab-5": { "description": "Focus fifth tab in the active group" },
+    "focus-group-tab-6": { "description": "Focus sixth tab in the active group" },
+    "focus-group-tab-7": { "description": "Focus seventh tab in the active group" },
+    "focus-group-tab-8": { "description": "Focus eighth tab in the active group" },
+    "focus-group-tab-9": { "description": "Focus ninth tab in the active group" }
   },
   "options_page": "options.html",
   "host_permissions": [

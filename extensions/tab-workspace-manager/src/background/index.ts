@@ -1,4 +1,4 @@
-import { enableActionSidePanelOpen, openExtensionPanel, webext } from "@minext/browser-api";
+import { closeExtensionPanel, enableActionSidePanelOpen, openExtensionPanel, webext } from "@minext/browser-api";
 import {
   conversationFromTab,
   DEFAULT_CONFIG,
@@ -144,7 +144,12 @@ const reminderApis = (): ReminderRuntimeApi => (globalThis as typeof globalThis 
 let panelRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 let autohiddenMediaPanel: AutohiddenMediaPanel | undefined;
 
-function notifyActiveMediaStarted(tabId: number, windowId: number): void {
+async function notifyActiveMediaStarted(tabId: number, windowId: number): Promise<void> {
+  const config = await getConfig();
+  if (!config.panel.autoHideWhenActiveTabPlaysMedia) {
+    return;
+  }
+
   void webext.runtime.sendMessage({ tabId, type: "MEDIA_PLAYING_IN_ACTIVE_TAB", windowId } satisfies RuntimeEvent).catch(() => undefined);
 }
 
@@ -843,6 +848,25 @@ async function openLlmProvider(providerId: string): Promise<void> {
   notifyPanelStateChanged();
 }
 
+async function focusGroupTabByShortcut(position: number): Promise<void> {
+  if (!Number.isInteger(position) || position < 1 || position > 9) {
+    return;
+  }
+
+  const config = await getConfig();
+  const tabs = await listTabs(config);
+  const groups = await syncManagedGroupsWithBrowser(tabs, await pruneManagedGroups(tabs));
+  const activeTab = tabs.find((tab) => tab.active);
+  const activeGroup = activeTab ? groups.find((group) => group.tabIds.includes(activeTab.id)) : undefined;
+  const targetGroup = activeGroup ?? groups.find((group) => group.id === "llm:workbench") ?? groups[0];
+  const targetTabId = targetGroup?.tabIds.filter((tabId) => tabs.some((tab) => tab.id === tabId))[position - 1];
+  const targetTab = tabs.find((tab) => tab.id === targetTabId);
+
+  if (targetTab) {
+    await focusTab(targetTab.id, targetTab.windowId);
+  }
+}
+
 function summarizablePageUrl(url: string | undefined): string | undefined {
   if (!url) {
     return undefined;
@@ -1057,6 +1081,12 @@ async function groupOpenedFromParent(tab: BrowserTab): Promise<void> {
     return;
   }
 
+  // Launchpad tabs are grouped explicitly by openLlmProvider. Letting the
+  // opener-group handler manage them as well races its managed-group write.
+  if (providerForUrl(tab.url ?? "", config.llmProviders)) {
+    return;
+  }
+
   const opener = await webext.tabs.get(tab.openerTabId).catch(() => undefined);
   if (!opener || typeof opener.id !== "number") {
     return;
@@ -1158,6 +1188,10 @@ async function handleMessage(message: ExtensionMessage, sender: MessageSender = 
         return { ok: true };
       case "PANEL_AUTOHIDDEN_FOR_MEDIA":
         rememberPanelAutoHiddenForMedia(message.tabId, message.windowId);
+        await closeExtensionPanel(message.windowId).catch(() => false);
+        return { ok: true };
+      case "FOCUS_GROUP_TAB":
+        await focusGroupTabByShortcut(message.position);
         return { ok: true };
       case "OPEN_WORKSPACE":
         await openWorkspace(message.workspace);
@@ -1244,6 +1278,11 @@ webext.commands.onCommand.addListener((command) => {
   if (command === "group-by-domain") {
     void groupCurrentWindowByDomain();
   }
+
+  const shortcutMatch = /^focus-group-tab-([1-9])$/.exec(command);
+  if (shortcutMatch) {
+    void focusGroupTabByShortcut(Number(shortcutMatch[1]));
+  }
 });
 
 webext.tabs.onUpdated.addListener((tabId, changeInfo) => {
@@ -1254,7 +1293,7 @@ webext.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.audible === true) {
     void webext.tabs.get(tabId).then((tab) => {
       if (tab.active && tab.audible && typeof tab.windowId === "number") {
-        notifyActiveMediaStarted(tabId, tab.windowId);
+        void notifyActiveMediaStarted(tabId, tab.windowId);
       }
     }).catch(() => undefined);
   }
@@ -1301,7 +1340,7 @@ webext.tabs.onActivated.addListener(() => {
     await saveTabMetadata(metadata);
 
     if (tab.audible && typeof tab.windowId === "number") {
-      notifyActiveMediaStarted(tab.id, tab.windowId);
+      void notifyActiveMediaStarted(tab.id, tab.windowId);
     }
   }).catch(() => undefined);
   notifyPanelStateChanged();
