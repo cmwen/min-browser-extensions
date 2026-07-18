@@ -671,10 +671,13 @@ function App(): React.ReactElement {
         return;
       }
 
+      const searchInput = document.querySelector<HTMLInputElement>("#tab-search");
+      const focusedElement = document.activeElement;
+      const isSearchFocused = focusedElement === searchInput;
       const shortcutMatch = /^Digit([1-9])$/.exec(event.code);
-      if (keyboardNavigationActive && event.altKey && !event.ctrlKey && !event.metaKey && shortcutMatch) {
+      if (isSearchFocused && event.altKey && !event.ctrlKey && !event.metaKey && shortcutMatch) {
         event.preventDefault();
-        void runAction({ position: Number(shortcutMatch[1]), type: "FOCUS_GROUP_TAB" });
+        tabButtons()[Number(shortcutMatch[1]) - 1]?.click();
         return;
       }
 
@@ -682,10 +685,7 @@ function App(): React.ReactElement {
         return;
       }
 
-      const searchInput = document.querySelector<HTMLInputElement>("#tab-search");
-      const focusedElement = document.activeElement;
       const currentIndex = tabButtons().findIndex((button) => button === focusedElement);
-      const isSearchFocused = focusedElement === searchInput;
       if (!isSearchFocused && currentIndex === -1) {
         return;
       }

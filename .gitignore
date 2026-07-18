@@ -3,4 +3,5 @@ dist/
 coverage/
 .DS_Store
 *.log
-
+.playwright-mcp/
+.pnpm-store/

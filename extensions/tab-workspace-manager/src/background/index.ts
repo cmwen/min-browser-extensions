@@ -152,6 +152,8 @@ const nativeTabGroupApis = (): NativeTabGroupApi => {
 const reminderApis = (): ReminderRuntimeApi => (globalThis as typeof globalThis & { chrome?: ReminderRuntimeApi }).chrome ?? (webext as ReminderRuntimeApi);
 
 let panelRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+let pendingLlmLaunches = 0;
+const launchedLlmTabIds = new Set<number>();
 
 async function notifyActiveMediaStarted(tabId: number, windowId: number): Promise<void> {
   const config = await getConfig();
@@ -804,7 +806,9 @@ async function groupLlmTabs(config: AppConfig, extraTabs: TabSnapshot[] = []): P
     return;
   }
 
-  const existingGroup = (await getManagedGroups()).find((group) => group.id === "llm:workbench");
+  const llmTabIds = llmTabs.map((tab) => tab.id);
+  const managedGroups = await getManagedGroups();
+  const existingGroup = managedGroups.find((group) => group.id === "llm:workbench");
   const color = existingGroup?.color ?? "purple";
   const title = existingGroup?.title ?? config.llmProviders.find((provider) => provider.enabled)?.groupTitle ?? "LLM Workbench";
   const tabIdsForBrowserGroup =
@@ -813,14 +817,24 @@ async function groupLlmTabs(config: AppConfig, extraTabs: TabSnapshot[] = []): P
       : llmTabs.map((tab) => tab.id);
   const browserGroupId = await groupTabIds(tabIdsForBrowserGroup, title, color, existingGroup?.browserGroupId);
 
-  await addManagedGroup({
-    color,
-    id: "llm:workbench",
-    kind: "llm",
-    tabIds: llmTabs.map((tab) => tab.id),
-    title,
-    ...(typeof browserGroupId === "number" ? { browserGroupId } : {}),
-  });
+  const nextGroups = nextManagedGroup(
+    managedGroups
+      .map((group) =>
+        group.id === "llm:workbench"
+          ? group
+          : { ...group, tabIds: group.tabIds.filter((tabId) => !llmTabIds.includes(tabId)) },
+      )
+      .filter((group) => group.tabIds.length > 0),
+    {
+      color,
+      id: "llm:workbench",
+      kind: "llm",
+      tabIds: llmTabIds,
+      title,
+      ...(typeof browserGroupId === "number" ? { browserGroupId } : {}),
+    },
+  );
+  await saveManagedGroups(nextGroups);
 }
 
 async function openLlmProvider(providerId: string): Promise<void> {
@@ -830,33 +844,29 @@ async function openLlmProvider(providerId: string): Promise<void> {
     throw new Error(`Unknown LLM provider: ${providerId}`);
   }
 
-  const tab = await webext.tabs.create({ active: true, url: provider.url });
-  const snapshot = snapshotTab(tab, config);
-  if (snapshot) {
-    const conversations = await getConversations();
-    await saveConversations([conversationFromTab(snapshot, provider, "waiting"), ...conversations].slice(0, 80));
-  }
+  pendingLlmLaunches += 1;
+  let launchedTabId: number | undefined;
+  try {
+    const tab = await webext.tabs.create({ active: true, url: provider.url });
+    launchedTabId = tab.id;
+    if (typeof launchedTabId === "number") {
+      launchedLlmTabIds.add(launchedTabId);
+    }
 
-  await groupLlmTabs(config, snapshot ? [snapshot] : []);
-  notifyPanelStateChanged();
-}
+    const snapshot = snapshotTab(tab, config);
+    if (snapshot) {
+      const conversations = await getConversations();
+      await saveConversations([conversationFromTab(snapshot, provider, "waiting"), ...conversations].slice(0, 80));
+    }
 
-async function focusGroupTabByShortcut(position: number): Promise<void> {
-  if (!Number.isInteger(position) || position < 1 || position > 9) {
-    return;
-  }
-
-  const config = await getConfig();
-  const tabs = await listTabs(config);
-  const groups = await syncManagedGroupsWithBrowser(tabs, await pruneManagedGroups(tabs));
-  const activeTab = tabs.find((tab) => tab.active);
-  const activeGroup = activeTab ? groups.find((group) => group.tabIds.includes(activeTab.id)) : undefined;
-  const targetGroup = activeGroup ?? groups.find((group) => group.id === "llm:workbench") ?? groups[0];
-  const targetTabId = targetGroup?.tabIds.filter((tabId) => tabs.some((tab) => tab.id === tabId))[position - 1];
-  const targetTab = tabs.find((tab) => tab.id === targetTabId);
-
-  if (targetTab) {
-    await focusTab(targetTab.id, targetTab.windowId);
+    await groupLlmTabs(config, snapshot ? [snapshot] : []);
+    notifyPanelStateChanged();
+  } finally {
+    pendingLlmLaunches = Math.max(0, pendingLlmLaunches - 1);
+    if (typeof launchedTabId === "number") {
+      const tabId = launchedTabId;
+      setTimeout(() => launchedLlmTabIds.delete(tabId), 1_000);
+    }
   }
 }
 
@@ -1069,6 +1079,10 @@ async function removePinnedShortcut(shortcutId: string): Promise<void> {
 }
 
 async function groupOpenedFromParent(tab: BrowserTab): Promise<void> {
+  if (pendingLlmLaunches > 0 || (typeof tab.id === "number" && launchedLlmTabIds.has(tab.id))) {
+    return;
+  }
+
   const config = await getConfig();
   if (!config.grouping.autoGroupOpenerTabs || typeof tab.id !== "number" || typeof tab.openerTabId !== "number") {
     return;
@@ -1182,9 +1196,6 @@ async function handleMessage(message: ExtensionMessage, sender: MessageSender = 
       case "PANEL_AUTOHIDDEN_FOR_MEDIA":
         await closeExtensionPanel(message.windowId).catch(() => false);
         return { ok: true };
-      case "FOCUS_GROUP_TAB":
-        await focusGroupTabByShortcut(message.position);
-        return { ok: true };
       case "OPEN_WORKSPACE":
         await openWorkspace(message.workspace);
         return { ok: true };
@@ -1265,11 +1276,6 @@ webext.contextMenus?.onClicked.addListener((info, tab) => {
 webext.commands.onCommand.addListener((command) => {
   if (command === "group-by-domain") {
     void groupCurrentWindowByDomain();
-  }
-
-  const shortcutMatch = /^focus-group-tab-([1-9])$/.exec(command);
-  if (shortcutMatch) {
-    void focusGroupTabByShortcut(Number(shortcutMatch[1]));
   }
 });
 

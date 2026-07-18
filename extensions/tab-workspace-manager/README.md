@@ -149,7 +149,7 @@ Safari:
 
 - Browser command: `Activate extension` opens the side panel where supported. Assign its key in `chrome://extensions/shortcuts`; it uses the extension toolbar action, which Chrome permits to open a side panel.
 - Browser command: `Ctrl+Shift+G` or `Command+Shift+G` groups tabs by domain.
-- Panel shortcut: `Alt+1` through `Alt+9` (Option on macOS) focuses the corresponding tab in the active managed group. If the active tab is ungrouped, it uses LLM Workbench when present. The nine named commands can also be assigned browser-wide in the browser's extension shortcut settings.
+- Panel shortcut: with the search field focused, `Alt+1` through `Alt+9` (Option on macOS) opens the corresponding numbered tab.
 - Panel shortcut: `Ctrl+K` or `Command+K` focuses search.
 - Panel shortcut: `Ctrl+Shift+G` or `Command+Shift+G` groups tabs by domain.
 - With search focused, `ArrowUp` and `ArrowDown` move through the visible tabs; `Home` and `End` jump to the first or last tab.
