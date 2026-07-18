@@ -1142,6 +1142,7 @@ async function refreshConversationFromTab(tabId: number, changeInfo: TabChangeIn
   const next = conversationFromTab(snapshot, provider, titleChanged ? "responded" : statusForTabLoad(changeInfo.status));
   const withoutCurrent = conversations.filter((conversation) => conversation.tabId !== tabId);
   await saveConversations([next, ...withoutCurrent].slice(0, 80));
+  await groupLlmTabs(config, [snapshot]);
   notifyPanelStateChanged();
 }
 

@@ -634,15 +634,20 @@ function App(): React.ReactElement {
     [load],
   );
 
-  const keyboardShortcutByTabId = useMemo(() => {
+  const keyboardShortcutTabs = useMemo(() => {
     const visibleTabs = panelMode === "context"
       ? contextItems.map((item) => item.tab)
       : panelMode === "grouped"
         ? [...filteredManagedGroups.flatMap((group) => group.tabs), ...filteredUngroupedTabs]
         : [];
 
-    return new Map(visibleTabs.slice(0, 9).map((tab, index) => [tab.id, index + 1]));
+    return visibleTabs.slice(0, 9);
   }, [contextItems, filteredManagedGroups, filteredUngroupedTabs, panelMode]);
+
+  const keyboardShortcutByTabId = useMemo(
+    () => new Map(keyboardShortcutTabs.map((tab, index) => [tab.id, index + 1])),
+    [keyboardShortcutTabs],
+  );
 
   useEffect(() => {
     const tabButtons = (): HTMLButtonElement[] => [
@@ -677,7 +682,10 @@ function App(): React.ReactElement {
       const shortcutMatch = /^Digit([1-9])$/.exec(event.code);
       if (isSearchFocused && event.altKey && !event.ctrlKey && !event.metaKey && shortcutMatch) {
         event.preventDefault();
-        tabButtons()[Number(shortcutMatch[1]) - 1]?.click();
+        const targetTab = keyboardShortcutTabs[Number(shortcutMatch[1]) - 1];
+        if (targetTab) {
+          void runAction({ type: "FOCUS_TAB", tabId: targetTab.id, windowId: targetTab.windowId });
+        }
         return;
       }
 
@@ -709,7 +717,7 @@ function App(): React.ReactElement {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [keyboardNavigationActive, runAction]);
+  }, [keyboardNavigationActive, keyboardShortcutTabs, runAction]);
 
   const tuneWeightsForSelection = useCallback(
     async (item: ContextTabItem) => {
