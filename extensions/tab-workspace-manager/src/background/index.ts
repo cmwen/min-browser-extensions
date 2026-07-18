@@ -1,4 +1,4 @@
-import { closeExtensionPanel, enableActionSidePanelOpen, openExtensionPanel, webext } from "@minext/browser-api";
+import { closeExtensionPanel, enableActionSidePanelOpen, webext } from "@minext/browser-api";
 import {
   conversationFromTab,
   DEFAULT_CONFIG,
@@ -127,10 +127,20 @@ type TabMetadata = {
   openedAt: number;
 };
 
-type AutohiddenMediaPanel = {
-  tabId: number;
-  windowId: number;
-};
+function usableFavIconUrl(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    const protocol = new URL(value).protocol;
+    // Favicons provided by another extension are not readable unless that
+    // extension explicitly exposes them as web-accessible resources.
+    return protocol === "http:" || protocol === "https:" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const nativeTabGroupApis = (): NativeTabGroupApi => {
   const runtime = globalThis as typeof globalThis & {
@@ -142,7 +152,6 @@ const nativeTabGroupApis = (): NativeTabGroupApi => {
 const reminderApis = (): ReminderRuntimeApi => (globalThis as typeof globalThis & { chrome?: ReminderRuntimeApi }).chrome ?? (webext as ReminderRuntimeApi);
 
 let panelRefreshTimer: ReturnType<typeof setTimeout> | undefined;
-let autohiddenMediaPanel: AutohiddenMediaPanel | undefined;
 
 async function notifyActiveMediaStarted(tabId: number, windowId: number): Promise<void> {
   const config = await getConfig();
@@ -491,8 +500,9 @@ function snapshotTab(
     windowId: tab.windowId,
   };
 
-  if (tab.favIconUrl) {
-    snapshot.favIconUrl = tab.favIconUrl;
+  const favIconUrl = usableFavIconUrl(tab.favIconUrl);
+  if (favIconUrl) {
+    snapshot.favIconUrl = favIconUrl;
   }
 
   if (typeof tab.groupId === "number") {
@@ -709,23 +719,6 @@ async function groupCurrentWindowByDomain(): Promise<void> {
       });
     }),
   );
-}
-
-function rememberPanelAutoHiddenForMedia(tabId: number, windowId: number): void {
-  autohiddenMediaPanel = { tabId, windowId };
-}
-
-async function reopenPanelHiddenForMedia(tabId: number, fallbackWindowId: number): Promise<void> {
-  if (autohiddenMediaPanel?.tabId !== tabId) {
-    return;
-  }
-
-  const windowId = autohiddenMediaPanel.windowId ?? fallbackWindowId;
-  autohiddenMediaPanel = undefined;
-  const opened = await openExtensionPanel(windowId).catch(() => false);
-  if (opened) {
-    notifyPanelStateChanged();
-  }
 }
 
 async function moveTabsToManagedGroup(tabIds: number[], groupId: string): Promise<void> {
@@ -1187,7 +1180,6 @@ async function handleMessage(message: ExtensionMessage, sender: MessageSender = 
         await moveTabsToManagedGroup(message.tabIds, message.groupId);
         return { ok: true };
       case "PANEL_AUTOHIDDEN_FOR_MEDIA":
-        rememberPanelAutoHiddenForMedia(message.tabId, message.windowId);
         await closeExtensionPanel(message.windowId).catch(() => false);
         return { ok: true };
       case "FOCUS_GROUP_TAB":
@@ -1271,10 +1263,6 @@ webext.contextMenus?.onClicked.addListener((info, tab) => {
 });
 
 webext.commands.onCommand.addListener((command) => {
-  if (command === "open-side-panel") {
-    void webext.windows.getCurrent().then((window) => openExtensionPanel(window.id));
-  }
-
   if (command === "group-by-domain") {
     void groupCurrentWindowByDomain();
   }
@@ -1315,8 +1303,7 @@ webext.tabs.onCreated.addListener((tab) => {
   void groupOpenedFromParent(tab).finally(notifyPanelStateChanged);
 });
 
-webext.tabs.onRemoved.addListener((tabId, removeInfo) => {
-  void reopenPanelHiddenForMedia(tabId, removeInfo.windowId);
+webext.tabs.onRemoved.addListener((tabId) => {
   void getManagedGroups().then((groups) =>
     saveManagedGroups(
       groups

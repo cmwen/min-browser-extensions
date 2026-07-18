@@ -31,13 +31,6 @@
         "mac": "Command+Shift+Y"
       }
     },
-    "open-side-panel": {
-      "description": "Open Tab Workspace Manager",
-      "suggested_key": {
-        "default": "Ctrl+Shift+Period",
-        "mac": "Command+Shift+Period"
-      }
-    },
     "group-by-domain": {
       "description": "Group tabs by domain",
       "suggested_key": {
