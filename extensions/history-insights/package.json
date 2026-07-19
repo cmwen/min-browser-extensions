@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "browserTargets": ["chrome", "edge", "firefox", "safari"],
   "scripts": {
     "build": "pnpm build:chrome",
     "build:chrome": "node scripts/build-extension.mjs chrome",

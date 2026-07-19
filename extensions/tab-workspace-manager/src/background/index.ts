@@ -200,11 +200,11 @@ async function saveConversations(conversations: LlmConversation[]): Promise<void
 }
 
 async function pruneConversations(tabs: TabSnapshot[], config: AppConfig): Promise<LlmConversation[]> {
-  const liveTabIds = new Set(tabs.map((tab) => tab.id));
+  const tabsById = new Map(tabs.map((tab) => [tab.id, tab]));
   const conversations = await getConversations();
   const pruned = conversations.filter((conversation) => {
-    const tab = tabs.find((candidate) => candidate.id === conversation.tabId);
-    return liveTabIds.has(conversation.tabId) && Boolean(tab && providerForUrl(tab.url, config.llmProviders));
+    const tab = tabsById.get(conversation.tabId);
+    return Boolean(tab && providerForUrl(tab.url, config.llmProviders));
   });
 
   if (JSON.stringify(pruned) !== JSON.stringify(conversations)) {
@@ -398,15 +398,24 @@ function tabMetadataOrEmpty(value: unknown): Record<string, TabMetadata> {
 }
 
 async function exportData(): Promise<ExportPayload> {
+  const [config, conversations, followUps, managedGroups, pinnedShortcuts, tabMetadata] = await Promise.all([
+    getConfig(),
+    getConversations(),
+    getFollowUps(),
+    getManagedGroups(),
+    getPinnedShortcuts(),
+    getTabMetadata(),
+  ]);
+
   return {
     app: "tab-workspace-manager",
-    config: await getConfig(),
+    config,
     data: {
-      conversations: await getConversations(),
-      followUps: await getFollowUps(),
-      managedGroups: await getManagedGroups(),
-      pinnedShortcuts: await getPinnedShortcuts(),
-      tabMetadata: await getTabMetadata(),
+      conversations,
+      followUps,
+      managedGroups,
+      pinnedShortcuts,
+      tabMetadata,
     },
     exportedAt: new Date().toISOString(),
     schemaVersion: 1,
@@ -446,15 +455,7 @@ async function importData(payload: unknown): Promise<void> {
 async function metadataForTabs(tabs: BrowserTab[]): Promise<Record<string, TabMetadata>> {
   const now = Date.now();
   const metadata = await getTabMetadata();
-  const liveTabIds = new Set(tabs.map((tab) => tab.id).filter((id): id is number => typeof id === "number").map(String));
   let changed = false;
-
-  for (const tabId of Object.keys(metadata)) {
-    if (!liveTabIds.has(tabId)) {
-      delete metadata[tabId];
-      changed = true;
-    }
-  }
 
   for (const tab of tabs) {
     if (typeof tab.id !== "number") {
@@ -619,13 +620,16 @@ async function syncManagedGroupsWithBrowser(tabs: TabSnapshot[], groups: Managed
         };
       }
 
-      return {
-        ...group,
-        color: browserGroupColor(browserGroup?.color) || group.color,
-        tabIds: groupedTabs.map((tab) => tab.id),
-        title: browserGroup?.title?.trim() || group.title,
-        updatedAt: now,
-      };
+      const color = browserGroup ? browserGroupColor(browserGroup.color) : group.color;
+      const tabIds = groupedTabs.map((tab) => tab.id);
+      const title = browserGroup?.title?.trim() || group.title;
+      const unchanged =
+        color === group.color &&
+        title === group.title &&
+        tabIds.length === group.tabIds.length &&
+        tabIds.every((tabId, index) => tabId === group.tabIds[index]);
+
+      return unchanged ? group : { ...group, color, tabIds, title, updatedAt: now };
     })
     .filter((group) => group.tabIds.length > 0);
 
@@ -664,14 +668,17 @@ async function addManagedGroup(input: Parameters<typeof nextManagedGroup>[1]): P
 async function buildPanelState(windowId: number): Promise<PanelState> {
   const config = await getConfig();
   const tabs = await listTabs(config, windowId);
-  const syncedGroups = await syncManagedGroupsWithBrowser(tabs, await pruneManagedGroups(tabs));
+  const [syncedGroups, conversations, pinnedShortcuts, followUps] = await Promise.all([
+    pruneManagedGroups(tabs).then((groups) => syncManagedGroupsWithBrowser(tabs, groups)),
+    pruneConversations(tabs, config),
+    getPinnedShortcuts(),
+    pruneFollowUps(tabs),
+  ]);
+  const tabsById = new Map(tabs.map((tab) => [tab.id, tab]));
   const managedGroups = syncedGroups.map((group) => ({
     ...group,
-    tabs: group.tabIds.map((tabId) => tabs.find((tab) => tab.id === tabId)).filter((tab): tab is TabSnapshot => Boolean(tab)),
+    tabs: group.tabIds.map((tabId) => tabsById.get(tabId)).filter((tab): tab is TabSnapshot => Boolean(tab)),
   }));
-  const conversations = await pruneConversations(tabs, config);
-  const pinnedShortcuts = await getPinnedShortcuts();
-  const followUps = await pruneFollowUps(tabs);
 
   return { config, conversations, followUps, managedGroups, pinnedShortcuts, tabs };
 }
@@ -1311,13 +1318,24 @@ webext.tabs.onCreated.addListener((tab) => {
 });
 
 webext.tabs.onRemoved.addListener((tabId) => {
-  void getManagedGroups().then((groups) =>
-    saveManagedGroups(
-      groups
-        .map((group) => ({ ...group, tabIds: group.tabIds.filter((candidate) => candidate !== tabId) }))
-        .filter((group) => group.tabIds.length > 0),
+  void Promise.all([
+    getManagedGroups().then((groups) =>
+      saveManagedGroups(
+        groups
+          .map((group) => ({ ...group, tabIds: group.tabIds.filter((candidate) => candidate !== tabId) }))
+          .filter((group) => group.tabIds.length > 0),
+      ),
     ),
-  ).finally(notifyPanelStateChanged);
+    getTabMetadata().then((metadata) => {
+      const key = String(tabId);
+      if (!(key in metadata)) {
+        return;
+      }
+
+      delete metadata[key];
+      return saveTabMetadata(metadata);
+    }),
+  ]).finally(notifyPanelStateChanged);
 });
 
 webext.tabs.onActivated.addListener(() => {

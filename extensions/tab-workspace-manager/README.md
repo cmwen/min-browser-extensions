@@ -4,8 +4,7 @@ Side panel extension for choosing the right tab workflow for the moment: focus o
 
 ## Features
 
-- Chrome and Edge side panel UI.
-- Safari-compatible popup fallback using the same UI. Safari does not support Chromium's persistent `side_panel` extension surface.
+- Chrome and Edge side panel UI. Distribution is limited to browsers that support the Chromium `side_panel` extension surface.
 - Auto-group tabs by registrable domain.
 - Auto-group tabs opened from another tab, such as search results opened from a Google results page. This is enabled by default and can be disabled in preferences.
 - One-click workspace templates that open multiple tabs, group them in the browser where supported, and track them as managed extension groups.
@@ -94,8 +93,6 @@ The side panel also listens for real tab title, URL, favicon, activation, remova
 ```sh
 pnpm --filter @minext/tab-workspace-manager build:chrome
 pnpm --filter @minext/tab-workspace-manager build:edge
-pnpm --filter @minext/tab-workspace-manager build:firefox
-pnpm --filter @minext/tab-workspace-manager build:safari
 pnpm --filter @minext/tab-workspace-manager typecheck
 pnpm --filter @minext/tab-workspace-manager typecheck:native
 ```
@@ -116,42 +113,13 @@ Edge:
 3. Enable Developer mode.
 4. Load unpacked from `extensions/tab-workspace-manager/dist/edge`.
 
-Firefox:
-
-1. Build with `pnpm build:firefox`.
-2. Open `about:debugging#/runtime/this-firefox`.
-3. Choose Load Temporary Add-on.
-4. Select `extensions/tab-workspace-manager/dist/firefox/manifest.json`.
-5. The Firefox manifest uses a popup fallback. Native tab group mirroring requires Firefox 138 or newer.
-
-Safari:
-
-1. Build with `pnpm build:safari`.
-2. Use Safari's Web Extension conversion/signing flow from `extensions/tab-workspace-manager/dist/safari`.
-3. The Safari manifest uses a popup fallback because Chromium's `side_panel` API is not available in Safari Web Extensions.
-
-## Safari Limitations
-
-- No Chromium-style `side_panel` manifest key or `chrome.sidePanel` API.
-- No persistent extension panel alongside the webpage through WebExtensions alone.
-- Safari extensions must be converted into an Xcode app/extension project and signed before real browser testing.
-- Site access is more permission-forward in Safari, so content-script behavior depends on the user granting website access.
-- Some Chromium extension APIs, including tab grouping APIs, need browser-specific fallbacks or graceful no-op behavior.
-- Managed extension groups still work in the UI when browser tab grouping is unavailable, but Safari cannot mirror every group into a native browser tab group.
-
-## Firefox Notes
-
-- The Firefox build uses an action popup because Chromium's side panel API is not portable.
-- The manifest sets a Firefox 138 minimum for native tab group mirroring.
-- Media indicators use standard tab `audible` and `mutedInfo` fields when the browser reports them.
-
 ## Keyboard
 
 - Browser command: `Activate extension` opens the side panel where supported. Assign its key in `chrome://extensions/shortcuts`; it uses the extension toolbar action, which Chrome permits to open a side panel.
 - Browser command: `Ctrl+Shift+G` or `Command+Shift+G` groups tabs by domain.
-- Panel shortcut: with the search field focused, `Alt+1` through `Alt+9` (Option on macOS) opens the corresponding numbered tab.
+- Panel shortcut: the native access key shown on a tab opens that tab. Chrome and Edge use `Alt+1` through `Alt+9` on Windows/Linux and `Control+Option+1` through `Control+Option+9` on macOS.
 - Panel shortcut: `Ctrl+K` or `Command+K` focuses search.
 - Panel shortcut: `Ctrl+Shift+G` or `Command+Shift+G` groups tabs by domain.
 - With search focused, `ArrowUp` and `ArrowDown` move through the visible tabs; `Home` and `End` jump to the first or last tab.
-- While navigating by keyboard, the first nine visible tabs (including tabs inside groups) show a number. Press `Alt+1` through `Alt+9` (`Option` on macOS) to open that tab. Chrome reserves `Ctrl/Command+number` for its own tab switching.
+- While the search field or a tab row has focus, the first nine tabs (including tabs inside open groups) show their complete native access key. The label and the button's HTML `accesskey` come from the same descriptor, so the displayed key always matches the invoked tab.
 - `Escape` clears search and releases focus.

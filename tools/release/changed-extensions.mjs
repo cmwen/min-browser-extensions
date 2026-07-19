@@ -25,6 +25,9 @@ function extensionProjects() {
 
       const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
       return {
+        browserTargets: Array.isArray(packageJson.browserTargets)
+          ? packageJson.browserTargets
+          : ["chrome", "edge", "firefox", "safari"],
         directory,
         packageName: packageJson.name,
         version: packageJson.version,
@@ -42,6 +45,7 @@ function matrix(projectList) {
   return {
     count: projectList.length,
     include: projectList.map((project) => ({
+      browserTargets: project.browserTargets,
       directory: project.directory,
       packageName: project.packageName,
       version: project.version,

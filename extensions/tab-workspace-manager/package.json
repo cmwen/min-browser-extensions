@@ -1,14 +1,13 @@
 {
   "name": "@minext/tab-workspace-manager",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.4",
   "type": "module",
+  "browserTargets": ["chrome", "edge"],
   "scripts": {
     "build": "pnpm build:chrome",
     "build:chrome": "node scripts/build-extension.mjs chrome",
     "build:edge": "node scripts/build-extension.mjs edge",
-    "build:firefox": "node scripts/build-extension.mjs firefox",
-    "build:safari": "node scripts/build-extension.mjs safari",
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "typecheck:native": "tsgo --noEmit -p tsconfig.json"

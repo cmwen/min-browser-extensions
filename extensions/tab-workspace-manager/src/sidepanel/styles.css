@@ -708,7 +708,15 @@
     color: var(--accent);
     font-weight: 760;
     min-inline-size: 22px;
+    opacity: 0;
     text-align: center;
+    transition: opacity 120ms ease;
+    visibility: hidden;
+  }
+
+  .app-shell:has(#tab-search:focus, [data-tab-navigation-target="true"]:focus) .tab-jump-shortcut {
+    opacity: 1;
+    visibility: visible;
   }
 
   .tab-row.is-active .tab-main {
@@ -1082,6 +1090,7 @@
     border: 1px solid var(--border);
     border-radius: 7px;
     padding: 8px;
+    position: relative;
     transition:
       background 120ms ease,
       border-color 120ms ease,
@@ -1099,9 +1108,21 @@
     cursor: pointer;
     display: grid;
     gap: 8px;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr);
     list-style: none;
+    min-block-size: 34px;
+    padding-inline-end: 40px;
+  }
+
+  .domain-group details[open] > summary {
     margin-block-end: 8px;
+  }
+
+  .domain-group > .group-close-button {
+    inset-block-start: 8px;
+    inset-inline-end: 8px;
+    position: absolute;
+    z-index: 1;
   }
 
   .pinned-shortcuts {

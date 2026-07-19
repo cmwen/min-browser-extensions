@@ -32,7 +32,7 @@ pnpm build:safari
 pnpm pages:screenshots
 ```
 
-Chrome and Edge builds use side panel manifests. Firefox and Safari use the same UI through compatible popup fallbacks because the Chromium `side_panel` extension surface is not portable across those browsers. Browser tab grouping is best-effort where the target browser exposes grouping APIs; the extension still tracks its own managed groups so tabs can be closed together from the UI.
+Tab Workspace Manager is distributed only for Chrome and Edge, where the Chromium `side_panel` surface is available. History Insights retains its Firefox and Safari popup fallbacks. Browser tab grouping is best-effort where the target browser exposes grouping APIs; each extension still tracks its own managed state where needed.
 
 GitHub release builds are produced per changed extension. Shared package or root tooling changes release every extension because those changes can affect all build outputs.
 
