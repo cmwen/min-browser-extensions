@@ -33,6 +33,7 @@ import {
 } from "@minext/core";
 import { webext } from "@minext/browser-api";
 import type { ExtensionMessage, ExtensionResponse, PanelState, RuntimeEvent } from "../shared/messages";
+import { shortcutLayoutForGroups } from "./shortcut-layout";
 import "./styles.css";
 
 const root = document.getElementById("root");
@@ -41,9 +42,9 @@ type TabDragPayload = {
   tabIds: number[];
 };
 
-type TabAccessKey = {
-  accessKey: string;
+type TabShortcut = {
   ariaKeyShortcuts: string;
+  key: string;
   label: string;
 };
 
@@ -101,16 +102,16 @@ function applyTheme(config: AppConfig): void {
   document.documentElement.dataset.theme = config.theme;
 }
 
-function tabAccessKey(index: number): TabAccessKey | undefined {
-  const accessKey = TAB_ACCESS_KEYS[index];
-  if (!accessKey) {
+function tabShortcut(index: number): TabShortcut | undefined {
+  const key = TAB_ACCESS_KEYS[index];
+  if (!key) {
     return undefined;
   }
 
   return {
-    accessKey,
-    ariaKeyShortcuts: IS_MAC ? `Control+Alt+${accessKey}` : `Alt+${accessKey}`,
-    label: IS_MAC ? `⌃⌥${accessKey}` : `Alt+${accessKey}`,
+    ariaKeyShortcuts: IS_MAC ? `Control+Alt+${key}` : `Alt+${key}`,
+    key,
+    label: IS_MAC ? `⌃⌥${key}` : `Alt+${key}`,
   };
 }
 
@@ -663,24 +664,6 @@ function App(): React.ReactElement {
     [load],
   );
 
-  const keyboardShortcutTabs = useMemo(() => {
-    const visibleTabs = panelMode === "context"
-      ? contextItems.map((item) => item.tab)
-      : panelMode === "grouped"
-        ? [...filteredManagedGroups.flatMap((group) => group.tabs), ...filteredUngroupedTabs]
-        : [];
-
-    return visibleTabs.slice(0, 9);
-  }, [contextItems, filteredManagedGroups, filteredUngroupedTabs, panelMode]);
-
-  const accessKeyByTabId = useMemo(
-    () => new Map(keyboardShortcutTabs.flatMap((tab, index) => {
-      const shortcut = tabAccessKey(index);
-      return shortcut ? [[tab.id, shortcut] as const] : [];
-    })),
-    [keyboardShortcutTabs],
-  );
-
   useEffect(() => {
     const tabButtons = (): HTMLButtonElement[] => [
       ...document.querySelectorAll<HTMLButtonElement>("[data-tab-navigation-target='true']"),
@@ -714,7 +697,7 @@ function App(): React.ReactElement {
         ? event.ctrlKey && event.altKey && !event.metaKey
         : event.altKey && !event.ctrlKey && !event.metaKey;
       if (!event.shiftKey && !event.repeat && hasAccessKeyModifier && accessKeyMatch) {
-        const target = [...document.querySelectorAll<HTMLButtonElement>(`button[accesskey="${accessKeyMatch[1]}"]`)]
+        const target = [...document.querySelectorAll<HTMLButtonElement>(`button[data-tab-shortcut="${accessKeyMatch[1]}"]`)]
           .find((button) => button.getClientRects().length > 0);
         if (target) {
           event.preventDefault();
@@ -955,7 +938,6 @@ function App(): React.ReactElement {
               recentFollowUpTabIds={recentFollowUpTabIds}
               recentPinnedUrls={recentPinnedUrls}
               runAction={runAction}
-              accessKeyByTabId={accessKeyByTabId}
             />
           ) : hasSearchQuery ? (
             <EmptyState icon={<Search size={18} />} title="No tab matches" detail="Search checks tab titles and URLs across all tabs." />
@@ -977,7 +959,6 @@ function App(): React.ReactElement {
           recentPinnedUrls={recentPinnedUrls}
           runAction={runAction}
           tabIdsByGroupId={tabIdsByGroupId}
-          accessKeyByTabId={accessKeyByTabId}
         />
       ) : (
         <FollowUpView activeTab={activeTab} followUps={state.followUps} query={query} runAction={runAction} tabs={state.tabs} />
@@ -1006,7 +987,6 @@ function GroupedTabsView({
   recentPinnedUrls,
   runAction,
   tabIdsByGroupId,
-  accessKeyByTabId,
 }: {
   conversationStatusByTabId: Map<number, LlmConversationStatus>;
   filteredManagedGroups: PanelState["managedGroups"];
@@ -1022,9 +1002,9 @@ function GroupedTabsView({
   recentPinnedUrls: Set<string>;
   runAction: (message: ExtensionMessage) => Promise<void>;
   tabIdsByGroupId: Map<string, number[]>;
-  accessKeyByTabId: Map<number, TabAccessKey>;
 }): React.ReactElement {
   const [dropTargetGroupId, setDropTargetGroupId] = useState<string | undefined>();
+  const shortcutLayout = shortcutLayoutForGroups(filteredManagedGroups);
 
   const onGroupDragOver = (event: React.DragEvent, groupId: string) => {
     if (!hasTabDragData(event)) {
@@ -1078,7 +1058,6 @@ function GroupedTabsView({
                     </span>
                   </summary>
                   <TabList
-                    accessKeyByTabId={accessKeyByTabId}
                     conversationStatusByTabId={conversationStatusByTabId}
                     followUpUrls={followUpUrls}
                     onPinTab={onPinTab}
@@ -1088,6 +1067,7 @@ function GroupedTabsView({
                     recentPinnedUrls={recentPinnedUrls}
                     draggableTabs
                     runAction={runAction}
+                    shortcutOffset={shortcutLayout.offsetByGroupId.get(group.id) ?? 0}
                     tabs={group.tabs}
                   />
                 </details>
@@ -1125,8 +1105,8 @@ function GroupedTabsView({
             recentFollowUpTabIds={recentFollowUpTabIds}
             recentPinnedUrls={recentPinnedUrls}
             draggableTabs
-            accessKeyByTabId={accessKeyByTabId}
             runAction={runAction}
+            shortcutOffset={shortcutLayout.ungroupedOffset}
             tabs={filteredTabs}
           />
         ) : hasSearchQuery && matchingTabCount === 0 ? (
@@ -1403,7 +1383,6 @@ function ContextRail({
   recentFollowUpTabIds,
   recentPinnedUrls,
   runAction,
-  accessKeyByTabId,
 }: {
   conversationStatusByTabId: Map<number, LlmConversationStatus>;
   followUpUrls: Set<string>;
@@ -1415,7 +1394,6 @@ function ContextRail({
   recentFollowUpTabIds: Set<number>;
   recentPinnedUrls: Set<string>;
   runAction: (message: ExtensionMessage) => Promise<void>;
-  accessKeyByTabId: Map<number, TabAccessKey>;
 }): React.ReactElement {
   const activeItem = items.find((item) => item.slot === 0);
 
@@ -1429,7 +1407,7 @@ function ContextRail({
         <Globe2 size={13} />
         Same site or group
       </div>
-      {items.map((item) => {
+      {items.map((item, index) => {
         const tab = item.tab;
         const status = conversationStatusByTabId.get(tab.id);
         const isStrong = item.relation.score >= 0.62 && item.slot !== 0;
@@ -1437,7 +1415,7 @@ function ContextRail({
         const isFollowUpRecent = recentFollowUpTabIds.has(tab.id);
         const isShortcutSaved = pinnedUrls.has(tab.url);
         const isShortcutRecent = recentPinnedUrls.has(tab.url);
-        const keyboardShortcut = accessKeyByTabId.get(tab.id);
+        const keyboardShortcut = tabShortcut(index);
 
         return (
           <div
@@ -1459,10 +1437,10 @@ function ContextRail({
           >
             {isStrong ? <span className="connection-line" aria-hidden="true" /> : null}
           <button
-            accessKey={keyboardShortcut?.accessKey}
             aria-keyshortcuts={keyboardShortcut?.ariaKeyShortcuts}
             className="context-tab-main"
             data-tab-navigation-target="true"
+            data-tab-shortcut={keyboardShortcut?.key}
             data-slot={item.slot}
             type="button"
             onClick={() => void onFocusTab(item)}
@@ -1567,8 +1545,8 @@ function TabList({
   recentFollowUpTabIds,
   recentPinnedUrls,
   runAction,
+  shortcutOffset = 0,
   tabs,
-  accessKeyByTabId,
 }: {
   conversationStatusByTabId: Map<number, LlmConversationStatus>;
   draggableTabs?: boolean;
@@ -1579,18 +1557,18 @@ function TabList({
   recentFollowUpTabIds: Set<number>;
   recentPinnedUrls: Set<string>;
   runAction: (message: ExtensionMessage) => Promise<void>;
+  shortcutOffset?: number;
   tabs: TabSnapshot[];
-  accessKeyByTabId: Map<number, TabAccessKey>;
 }): React.ReactElement {
   return (
     <div className="tab-list" role="list">
-      {tabs.map((tab) => {
+      {tabs.map((tab, index) => {
         const status = conversationStatusByTabId.get(tab.id);
         const isFollowUpSaved = followUpUrls.has(tab.url);
         const isFollowUpRecent = recentFollowUpTabIds.has(tab.id);
         const isShortcutSaved = pinnedUrls.has(tab.url);
         const isShortcutRecent = recentPinnedUrls.has(tab.url);
-        const keyboardShortcut = accessKeyByTabId.get(tab.id);
+        const keyboardShortcut = tabShortcut(shortcutOffset + index);
 
         return (
           <div
@@ -1612,10 +1590,10 @@ function TabList({
             role="listitem"
           >
             <button
-              accessKey={keyboardShortcut?.accessKey}
               aria-keyshortcuts={keyboardShortcut?.ariaKeyShortcuts}
               className="tab-main"
               data-tab-navigation-target="true"
+              data-tab-shortcut={keyboardShortcut?.key}
               type="button"
               onClick={() => void runAction({ type: "FOCUS_TAB", tabId: tab.id, windowId: tab.windowId })}
             >

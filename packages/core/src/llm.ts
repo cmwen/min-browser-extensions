@@ -71,6 +71,15 @@ export function statusForTabLoad(status: string | undefined): LlmConversationSta
   return "active";
 }
 
+export function acknowledgeConversationResponse(
+  conversation: LlmConversation,
+  updatedAt = Date.now(),
+): LlmConversation {
+  return conversation.status === "responded"
+    ? { ...conversation, status: "active", updatedAt }
+    : conversation;
+}
+
 export function conversationFromTab(
   tab: TabSnapshot,
   provider: LlmProvider,

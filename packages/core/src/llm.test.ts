@@ -1,11 +1,38 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG, DEFAULT_LLM_PROVIDERS, mergeConfig } from "./config";
 import {
+  acknowledgeConversationResponse,
   NO_PAGE_SUMMARY_PROVIDER_ID,
   pageSummaryDeepLink,
   pageSummaryProvider,
   providerForUrl,
 } from "./llm";
+
+describe("acknowledgeConversationResponse", () => {
+  const conversation = {
+    providerId: "chatgpt",
+    status: "responded" as const,
+    tabId: 42,
+    title: "Research",
+    topic: "Research",
+    updatedAt: 100,
+    url: "https://chatgpt.com/c/42",
+    windowId: 7,
+  };
+
+  it("marks a responded conversation active when its tab is opened", () => {
+    expect(acknowledgeConversationResponse(conversation, 200)).toEqual({
+      ...conversation,
+      status: "active",
+      updatedAt: 200,
+    });
+  });
+
+  it("preserves conversations that do not need acknowledgement", () => {
+    const waiting = { ...conversation, status: "waiting" as const };
+    expect(acknowledgeConversationResponse(waiting, 200)).toBe(waiting);
+  });
+});
 
 describe("providerForUrl", () => {
   it("matches provider hostnames before registrable domain grouping", () => {

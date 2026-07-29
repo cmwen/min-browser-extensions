@@ -1,5 +1,6 @@
 import { closeExtensionPanel, enableActionSidePanelOpen, webext } from "@minext/browser-api";
 import {
+  acknowledgeConversationResponse,
   conversationFromTab,
   DEFAULT_CONFIG,
   domainKeyForUrl,
@@ -940,6 +941,26 @@ async function summarizePage(url: string | undefined): Promise<void> {
 async function focusTab(tabId: number, windowId: number): Promise<void> {
   await webext.windows.update(windowId, { focused: true });
   await webext.tabs.update(tabId, { active: true });
+  await acknowledgeConversationForTab(tabId);
+}
+
+async function acknowledgeConversationForTab(tabId: number): Promise<boolean> {
+  const conversations = await getConversations();
+  const existing = conversations.find((conversation) => conversation.tabId === tabId);
+  if (!existing) {
+    return false;
+  }
+
+  const acknowledged = acknowledgeConversationResponse(existing);
+  if (acknowledged === existing) {
+    return false;
+  }
+
+  await saveConversations([
+    acknowledged,
+    ...conversations.filter((conversation) => conversation.tabId !== tabId),
+  ]);
+  return true;
 }
 
 async function closeTabs(tabIds: number[]): Promise<void> {
@@ -1146,7 +1167,12 @@ async function refreshConversationFromTab(tabId: number, changeInfo: TabChangeIn
   const conversations = await getConversations();
   const existing = conversations.find((conversation) => conversation.tabId === tabId);
   const titleChanged = Boolean(changeInfo.title && existing && existing.title !== snapshot.title);
-  const next = conversationFromTab(snapshot, provider, titleChanged ? "responded" : statusForTabLoad(changeInfo.status));
+  const nextStatus = snapshot.active
+    ? "active"
+    : titleChanged
+      ? "responded"
+      : statusForTabLoad(changeInfo.status);
+  const next = conversationFromTab(snapshot, provider, nextStatus);
   const withoutCurrent = conversations.filter((conversation) => conversation.tabId !== tabId);
   await saveConversations([next, ...withoutCurrent].slice(0, 80));
   await groupLlmTabs(config, [snapshot]);
@@ -1171,7 +1197,7 @@ async function markLlmActivity(
   }
 
   const conversations = await getConversations();
-  const next = conversationFromTab(snapshot, provider, status);
+  const next = conversationFromTab(snapshot, provider, snapshot.active && status === "responded" ? "active" : status);
   const withoutCurrent = conversations.filter((conversation) => conversation.tabId !== snapshot.id);
   await saveConversations([next, ...withoutCurrent].slice(0, 80));
   notifyPanelStateChanged();
@@ -1338,24 +1364,22 @@ webext.tabs.onRemoved.addListener((tabId) => {
   ]).finally(notifyPanelStateChanged);
 });
 
-webext.tabs.onActivated.addListener(() => {
-  void webext.tabs.query({ active: true, currentWindow: true }).then(async ([tab]) => {
-    if (typeof tab?.id !== "number") {
-      return;
-    }
-
-    const metadata = await getTabMetadata();
-    metadata[String(tab.id)] = {
-      openedAt: metadata[String(tab.id)]?.openedAt ?? Date.now(),
+webext.tabs.onActivated.addListener(({ tabId }) => {
+  void webext.tabs.get(tabId).then(async (tab) => {
+    const [metadata] = await Promise.all([
+      getTabMetadata(),
+      acknowledgeConversationForTab(tabId),
+    ]);
+    metadata[String(tabId)] = {
+      openedAt: metadata[String(tabId)]?.openedAt ?? Date.now(),
       lastActiveAt: Date.now(),
     };
     await saveTabMetadata(metadata);
 
     if (tab.audible && typeof tab.windowId === "number") {
-      void notifyActiveMediaStarted(tab.id, tab.windowId);
+      void notifyActiveMediaStarted(tabId, tab.windowId);
     }
-  }).catch(() => undefined);
-  notifyPanelStateChanged();
+  }).catch(() => undefined).finally(notifyPanelStateChanged);
 });
 
 webext.runtime.onMessage.addListener((message: unknown, sender: unknown) => {

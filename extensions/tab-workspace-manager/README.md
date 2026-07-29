@@ -9,7 +9,7 @@ Side panel extension for choosing the right tab workflow for the moment: focus o
 - Auto-group tabs opened from another tab, such as search results opened from a Google results page. This is enabled by default and can be disabled in preferences.
 - One-click workspace templates that open multiple tabs, group them in the browser where supported, and track them as managed extension groups.
 - LLM launchpad for ChatGPT, Claude, Gemini, Copilot, and Perplexity. Each click opens a new session and adds it to the shared LLM Workbench group for multitasking.
-- LLM tab status markers shown directly on live tabs when a provider is active, waiting, or responded.
+- LLM tab status markers shown directly on live tabs when a provider is active, waiting, or responded. Opening a responded tab acknowledges it and returns its status to active.
 - Managed groups with one-click close for all tabs in the group.
 - Individual tab rows include close and shortcut actions.
 - Ungrouped Tabs list that hides tabs already shown inside managed Groups.
@@ -117,9 +117,9 @@ Edge:
 
 - Browser command: `Activate extension` opens the side panel where supported. Assign its key in `chrome://extensions/shortcuts`; it uses the extension toolbar action, which Chrome permits to open a side panel.
 - Browser command: `Ctrl+Shift+G` or `Command+Shift+G` groups tabs by domain.
-- Panel shortcut: the native access key shown on a tab opens that tab. Chrome and Edge use `Alt+1` through `Alt+9` on Windows/Linux and `Control+Option+1` through `Control+Option+9` on macOS.
+- Panel shortcut: the key shown on a tab opens that exact rendered row. Chrome and Edge use `Alt+1` through `Alt+9` on Windows/Linux and `Control+Option+1` through `Control+Option+9` on macOS.
 - Panel shortcut: `Ctrl+K` or `Command+K` focuses search.
 - Panel shortcut: `Ctrl+Shift+G` or `Command+Shift+G` groups tabs by domain.
 - With search focused, `ArrowUp` and `ArrowDown` move through the visible tabs; `Home` and `End` jump to the first or last tab.
-- While the search field or a tab row has focus, the first nine tabs (including tabs inside open groups) show their complete native access key. The label and the button's HTML `accesskey` come from the same descriptor, so the displayed key always matches the invoked tab.
+- While the search field or a tab row has focus, the first nine rendered tabs (including tabs inside open groups) show their complete shortcut. Labels and key handling use the same positional row assignment, including when tabs move into the LLM Workbench.
 - `Escape` clears search and releases focus.
