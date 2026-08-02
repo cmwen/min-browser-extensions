@@ -3,11 +3,12 @@
   "private": true,
   "version": "0.1.4",
   "type": "module",
-  "browserTargets": ["chrome", "edge"],
+  "browserTargets": ["chrome", "edge", "firefox"],
   "scripts": {
     "build": "pnpm build:chrome",
     "build:chrome": "node scripts/build-extension.mjs chrome",
     "build:edge": "node scripts/build-extension.mjs edge",
+    "build:firefox": "node scripts/build-extension.mjs firefox",
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "typecheck:native": "tsgo --noEmit -p tsconfig.json"

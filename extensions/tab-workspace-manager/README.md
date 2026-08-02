@@ -4,7 +4,7 @@ Side panel extension for choosing the right tab workflow for the moment: focus o
 
 ## Features
 
-- Chrome and Edge side panel UI. Distribution is limited to browsers that support the Chromium `side_panel` extension surface.
+- Chrome and Edge side panel UI plus a Firefox sidebar build. Firefox uses its `sidebar_action` surface and requires Firefox 138 or newer for browser tab-group operations.
 - Auto-group tabs by registrable domain.
 - Auto-group tabs opened from another tab, such as search results opened from a Google results page. This is enabled by default and can be disabled in preferences.
 - One-click workspace templates that open multiple tabs, group them in the browser where supported, and track them as managed extension groups.
@@ -93,6 +93,7 @@ The side panel also listens for real tab title, URL, favicon, activation, remova
 ```sh
 pnpm --filter @minext/tab-workspace-manager build:chrome
 pnpm --filter @minext/tab-workspace-manager build:edge
+pnpm --filter @minext/tab-workspace-manager build:firefox
 pnpm --filter @minext/tab-workspace-manager typecheck
 pnpm --filter @minext/tab-workspace-manager typecheck:native
 ```
@@ -113,9 +114,18 @@ Edge:
 3. Enable Developer mode.
 4. Load unpacked from `extensions/tab-workspace-manager/dist/edge`.
 
+Firefox:
+
+1. Build with `pnpm build:firefox`.
+2. Open `about:debugging#/runtime/this-firefox`.
+3. Select **Load Temporary Add-on**.
+4. Choose `extensions/tab-workspace-manager/dist/firefox/manifest.json`.
+
+The Firefox build opens as a browser sidebar. Use Firefox's sidebar menu or the assigned `_execute_sidebar_action` shortcut to open it. Automatic “hide panel when the active tab starts playing media” is intentionally unavailable in Firefox because its sidebar close API requires a user action.
+
 ## Keyboard
 
-- Browser command: `Activate extension` opens the side panel where supported. Assign its key in `chrome://extensions/shortcuts`; it uses the extension toolbar action, which Chrome permits to open a side panel.
+- Browser command: `Activate extension` opens the Chromium side panel in Chrome/Edge. Firefox uses its `_execute_sidebar_action` command to open the sidebar; assign shortcut keys in the browser's extension shortcut settings.
 - Browser command: `Ctrl+Shift+G` or `Command+Shift+G` groups tabs by domain.
 - Panel shortcut: the key shown on a tab opens that exact rendered row. Chrome and Edge use `Alt+1` through `Alt+9` on Windows/Linux and `Control+Option+1` through `Control+Option+9` on macOS.
 - Panel shortcut: `Ctrl+K` or `Command+K` focuses search.

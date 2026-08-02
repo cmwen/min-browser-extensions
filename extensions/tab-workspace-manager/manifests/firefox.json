@@ -1,0 +1,63 @@
+{
+  "manifest_version": 3,
+  "name": "Tab Workspace Manager",
+  "version": "0.1.4",
+  "description": "Manage tab groups, workspace templates, and LLM conversations from a native-feeling sidebar.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "tab-workspace-manager@minext.local",
+      "strict_min_version": "138.0"
+    }
+  },
+  "action": {
+    "default_title": "Tab Workspace Manager"
+  },
+  "background": {
+    "scripts": ["assets/background.js"],
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*",
+        "https://copilot.microsoft.com/*",
+        "https://www.perplexity.ai/*"
+      ],
+      "js": ["assets/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "_execute_sidebar_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      }
+    },
+    "group-by-domain": {
+      "description": "Group tabs by domain",
+      "suggested_key": {
+        "default": "Ctrl+Shift+G",
+        "mac": "Command+Shift+G"
+      }
+    }
+  },
+  "options_page": "options.html",
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://claude.ai/*",
+    "https://gemini.google.com/*",
+    "https://copilot.microsoft.com/*",
+    "https://www.perplexity.ai/*"
+  ],
+  "permissions": ["alarms", "contextMenus", "notifications", "storage", "tabGroups", "tabs"],
+  "sidebar_action": {
+    "default_panel": "sidepanel.html",
+    "default_title": "Tab Workspace Manager",
+    "open_at_install": false
+  }
+}

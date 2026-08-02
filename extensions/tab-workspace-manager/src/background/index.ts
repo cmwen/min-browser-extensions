@@ -1,4 +1,4 @@
-import { closeExtensionPanel, enableActionSidePanelOpen, webext } from "@minext/browser-api";
+import { closeExtensionPanel, enableActionSidePanelOpen, openExtensionPanel, webext } from "@minext/browser-api";
 import {
   acknowledgeConversationResponse,
   conversationFromTab,
@@ -1283,6 +1283,10 @@ webext.runtime.onInstalled.addListener(() => {
 webext.runtime.onStartup.addListener(() => {
   void refreshPageSummaryContextMenu().then(() => scheduleFollowUpAlarms());
   void enableActionSidePanelOpen();
+});
+
+webext.action.onClicked.addListener((tab) => {
+  void openExtensionPanel(tab.windowId).catch(() => undefined);
 });
 
 reminderApis().alarms?.onAlarm?.addListener((alarm) => {

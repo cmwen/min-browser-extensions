@@ -32,7 +32,7 @@ pnpm build:safari
 pnpm pages:screenshots
 ```
 
-Tab Workspace Manager is distributed only for Chrome and Edge, where the Chromium `side_panel` surface is available. History Insights retains its Firefox and Safari popup fallbacks. Browser tab grouping is best-effort where the target browser exposes grouping APIs; each extension still tracks its own managed state where needed.
+Tab Workspace Manager is distributed for Chrome, Edge, and Firefox. Chrome and Edge use the Chromium `side_panel` surface; Firefox uses `sidebar_action` and requires Firefox 138 or newer for browser tab-group operations. History Insights retains its Firefox and Safari popup fallbacks. Browser tab grouping is best-effort where the target browser exposes grouping APIs; each extension still tracks its own managed state where needed.
 
 GitHub release builds are produced per changed extension. Shared package or root tooling changes release every extension because those changes can affect all build outputs.
 

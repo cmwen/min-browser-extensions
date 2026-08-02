@@ -31,7 +31,7 @@ import {
   type TabSnapshot,
   type WorkspaceTemplate,
 } from "@minext/core";
-import { webext } from "@minext/browser-api";
+import { supportsAutomaticPanelClose, webext } from "@minext/browser-api";
 import type { ExtensionMessage, ExtensionResponse, PanelState, RuntimeEvent } from "../shared/messages";
 import { shortcutLayoutForGroups } from "./shortcut-layout";
 import "./styles.css";
@@ -513,6 +513,13 @@ function App(): React.ReactElement {
     const onMessage = (message: unknown) => {
       const runtimeEvent = message as RuntimeEvent;
       if (runtimeEvent.type === "MEDIA_PLAYING_IN_ACTIVE_TAB") {
+        // Firefox's sidebarAction.close() is user-gesture gated. Keep the
+        // Chromium auto-hide behavior, but do not issue a guaranteed-to-fail
+        // close request from a background media event in Firefox.
+        if (!supportsAutomaticPanelClose()) {
+          return;
+        }
+
         void sendMessage({
           tabId: runtimeEvent.tabId,
           type: "PANEL_AUTOHIDDEN_FOR_MEDIA",
