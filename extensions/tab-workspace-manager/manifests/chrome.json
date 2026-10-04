@@ -40,6 +40,9 @@
     }
   },
   "options_page": "options.html",
+  "externally_connectable": {
+    "ids": ["ofefgdigmcogchpijmpljpkkbkgdcedd"]
+  },
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",

@@ -6,6 +6,9 @@ const target = process.env.EXTENSION_TARGET ?? "chrome";
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    "import.meta.env.WEB_RELAY_ENABLED": target === "chrome" || target === "edge",
+  },
   build: {
     emptyOutDir: true,
     outDir: `dist/${target}`,

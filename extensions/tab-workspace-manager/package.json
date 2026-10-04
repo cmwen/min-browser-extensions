@@ -10,12 +10,14 @@
     "build:edge": "node scripts/build-extension.mjs edge",
     "build:firefox": "node scripts/build-extension.mjs firefox",
     "dev": "vite --host 127.0.0.1",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "typecheck:native": "tsgo --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@minext/browser-api": "workspace:*",
     "@minext/core": "workspace:*",
+    "@web-relay/sdk": "0.1.4",
     "lucide-react": "1.21.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",

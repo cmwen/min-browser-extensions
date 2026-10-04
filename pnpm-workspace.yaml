@@ -11,3 +11,4 @@ minimumReleaseAgeExclude:
   - '@typescript/native-preview-win32-x64@7.0.0-dev.20260619.1'
   - '@typescript/native-preview@7.0.0-dev.20260619.1'
   - '@types/node@26.0.0'
+  - '@web-relay/sdk@0.1.4'

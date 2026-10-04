@@ -24,6 +24,7 @@ import {
   type WorkspaceTemplate,
 } from "@minext/core";
 import type { ExportPayload, ExtensionMessage, ExtensionResponse, PanelState, RuntimeEvent } from "../shared/messages";
+import { registerWebRelayProvider } from "./web-relay";
 
 const CONFIG_KEY = "tabWorkspaceManager.config";
 const CONVERSATIONS_KEY = "tabWorkspaceManager.conversations";
@@ -710,9 +711,9 @@ async function groupTabIds(tabIds: number[], title: string, color: string, group
   return undefined;
 }
 
-async function groupCurrentWindowByDomain(): Promise<void> {
+async function groupCurrentWindowByDomain(windowId?: number): Promise<void> {
   const config = await getConfig();
-  const tabs = await listTabs(config);
+  const tabs = await listTabs(config, windowId);
   const groups = groupTabsByDomain(tabs, config.grouping);
 
   await Promise.all(
@@ -1273,6 +1274,23 @@ async function handleMessage(message: ExtensionMessage, sender: MessageSender = 
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+// The SDK's external-message transport is Chromium-specific. Firefox and future
+// Safari builds keep the existing UI and omit this integration at build time.
+if (import.meta.env.WEB_RELAY_ENABLED) {
+  registerWebRelayProvider({
+    getConfig,
+    groupByDomain: async (context) => {
+      const tab = context ? await webext.tabs.get(context.tabId) : undefined;
+      await groupCurrentWindowByDomain(tab?.windowId);
+      notifyPanelStateChanged();
+    },
+    openWorkspace,
+    openLlmProvider,
+    saveFollowUp: (tabId) => addFollowUpFromTab({ type: "ADD_FOLLOW_UP_FROM_TAB", tabId }),
+    openOptions: () => webext.runtime.openOptionsPage(),
+  });
 }
 
 webext.runtime.onInstalled.addListener(() => {

@@ -27,6 +27,41 @@ Side panel extension for choosing the right tab workflow for the moment: focus o
 - Import/export supports a full backup payload with configuration, follow-ups, pinned shortcuts, managed groups, LLM conversation metadata, and local tab signal metadata. Legacy config-only JSON can still be imported.
 - Light, dark, and system theme modes.
 - Keyboard shortcuts for side panel access, search, and domain grouping.
+- Web Relay launcher commands in Chrome and Edge for domain grouping, saved workspaces, new LLM chats, follow-ups, and settings.
+
+## Web Relay Launcher
+
+Chrome and Edge bundle `@web-relay/sdk/extension` 0.1.4 into the background worker. The provider ID is `tab-workspace-manager`, with the pairing name `Tab Workspace Manager`. The SDK registers its external listener synchronously at worker startup, validates the paired sender and active-tab snapshot, and returns action results or errors. Its `describe` response lets the launcher check the provider identity without loading configuration or running commands. Saved configuration is read again on invocation. The SDK also supports asynchronous registration with a fresh registry for each discovery or execution request.
+
+SDK 0.1.4 validates metadata during registration: at most 50 commands per registry, IDs up to 80 characters, nonblank titles up to 120, and optional nonblank descriptions up to 300. This provider registers five fixed commands. The returned `dispose()` removes its external listener; it does not cancel actions already running. Registration stays at worker startup rather than being mounted by the panel UI.
+
+The [PWA integration guide](https://web-relay.github.io/guides/pwa/) covers hosted web apps using `createLauncher` from `@web-relay/sdk`, with live app-owned context and teardown via `dispose()`. Its SDK 0.1.4 provider-addressed requests and launcher 0.0.3 **Pair a web app** flow apply to that page bridge. This extension uses the service-worker `createExtensionProvider` transport and **Manage extension providers** pairing below. PWA host-access permissions are not needed for this integration.
+
+Available commands:
+
+| Capability ID | Behavior |
+| --- | --- |
+| `tab-workspace-manager.group-by-domain` | Group tabs in the active page's window using saved rules; works without page context too. |
+| `tab-workspace-manager.open-workspace` | Text input: exact saved workspace name or ID, ignoring case. Opens its tabs and named group. |
+| `tab-workspace-manager.open-llm-provider` | Text input: exact enabled provider name or ID, such as `ChatGPT` or `gemini`. Opens a new chat in LLM Workbench. |
+| `tab-workspace-manager.save-follow-up` | Save the active HTTP/HTTPS page in Follow-up, leaving the tab open. Hidden without website context. |
+| `tab-workspace-manager.open-settings` | Open this extension's options page. |
+
+Workspace IDs resolve before names. If several workspaces share a name, use the specific ID. Empty workspaces and disabled LLM providers return actionable errors. The integration reuses the same operations as the panel and adds no host permissions.
+
+Pairing is explicit, following the [Web Relay extension integration guide](https://web-relay.github.io/guides/extensions/):
+
+1. Build and load the Chrome or Edge extension using the instructions below, then copy its installed ID from `chrome://extensions` or `edge://extensions`.
+2. Install Web Relay launcher 0.0.2 or later in the same browser profile. Open **Capability sources → Manage extension providers**, or the launcher's **Options** page.
+3. Paste this extension's installed ID and select **Check connection**. Review the name `Tab Workspace Manager`, provider ID `tab-workspace-manager`, installed extension ID, and protocol version `1`. Compare the installed ID yourself; the name is self-reported.
+4. Choose whether to **Share the current tab's URL**. This is off by default. Enabling it shares the tab ID and full URL during discovery and execution, allowing the follow-up command and page-specific grouping; page contents are not shared.
+5. Select **Approve pairing**, then refresh the launcher to discover the commands above. Pairing persists across browser and worker restarts; no launcher source edits or rebuild are required. To change URL sharing, remove the pairing and approve it again with the desired choice.
+
+The Chrome/Edge manifests allow only launcher ID `ofefgdigmcogchpijmpljpkkbkgdcedd`, which matches the SDK's development `LAUNCHER_ID`. If your launcher has another ID, change both `externally_connectable.ids` manifests and the SDK registration's `launcherId` in `src/background/web-relay.ts` to that exact ID, then rebuild and reload. Do not use a wildcard. Installed extension IDs can differ between Chrome and Edge or after moving an unpacked build; pair the actual installed ID in each browser. Installing the SDK does not approve pairing.
+
+After pairing, verify command discovery, one settings invocation, grouping in the intended window, a saved workspace, an enabled LLM provider, and saving a website for follow-up. Change the active page after opening the palette and confirm a stale-context error; disable this extension and confirm its commands disappear after launcher refresh. A launcher timeout does not cancel a delivered action: inspect the result before retrying a workspace or chat launch.
+
+Web Relay's SDK transport currently targets Chromium. It is removed from the Firefox build, which retains the existing sidebar workflow. Safari Web Relay integration is unavailable; this extension currently has no supported Safari build.
 
 ## Product Direction
 
